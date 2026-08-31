@@ -4,13 +4,23 @@ const client = new Anthropic();
 
 export async function POST(req: Request) {
 	const { messages } = await req.json();
+	// if role is system, will throw 400 code
+	// console.log("messages ===", messages);
+
+	if (!Array.isArray(messages) || messages.length === 0) {
+		return new Response("Messages cannot be empty", { status: 400 });
+	}
+
+	if (messages.some((message: unknown) => (message as Anthropic.MessageParam)?.role === "system")) {
+		return new Response("System role is not allowed", { status: 400 });
+	}
 
 	const stream = client.messages.stream({
 		model: "claude-sonnet-4-6",
 		max_tokens: 1024,
-		temperature: 0.5,
+		temperature: 0.5, // 0
 		system: "You are a helpful assistant from Claude and model is claude-sonnet-4-6.",
-		messages: [{ role: "user", content: messages }]
+		messages: messages
 	});
 
 	const encoder = new TextEncoder();

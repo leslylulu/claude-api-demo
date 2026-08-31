@@ -268,6 +268,77 @@ conflicts with chunked transfer encoding.
 Error status codes: once the first byte is sent the status is locked at 200.
 Anything that can fail must be validated **before** `.stream()` is called.
 
+## page.tsx
+
+### `streaming`, not `loading`
+
+The first token arrives in ~200ms, so "waiting for the answer" is a state that
+barely exists. The meaningful one is "still receiving" — which is also what
+lets the button double as a Stop control.
+
+### `useRef` for the AbortController, not `useState`
+
+The controller is a mutable handle only ever read inside callbacks. Putting it
+in state would re-render for nothing.
+
+**Rule of thumb: does the UI need to update when this value changes?**
+No → `useRef`. Yes → `useState`.
+
+### The cancel chain
+
+```
+stopStreaming()
+  → controller.abort()
+  → fetch aborts
+  → connection drops
+  → route.ts cancel()
+  → stream.abort()          // Claude stops generating
+```
+
+`signal: controller.signal` on the fetch is what wires it all together.
+
+### Swallow AbortError
+
+```ts
+catch (error) {
+	// Aborting is a user action, not a failure — keep whatever streamed in
+	// instead of replacing it with an error message.
+	if (error instanceof DOMException && error.name === "AbortError") return;
+
+	console.error("Error sending message:", error);
+	setReply("An error occurred while sending the message.");
+} finally {
+	setStreaming(false);
+	abortRef.current = null;
+}
+```
+
+Without that guard, hitting Stop wipes the text already on screen.
+`return` inside `catch` still runs `finally`, so cleanup is unaffected.
+
+### Check `response.ok` before reading
+
+Errors thrown **before** the stream opens are normal HTTP status codes. Once
+the first byte is sent the status is locked at 200, so this check has to happen
+here — otherwise a 400 body gets streamed onto the page as if it were an answer.
+
+### Decode once per chunk
+
+```ts
+const chunk = decoder.decode(value, { stream: true });
+result += chunk;
+setReply(result);
+```
+
+`TextDecoder` is **stateful** — it buffers incomplete multi-byte sequences
+between calls. Decoding the same bytes twice (e.g. an extra `console.log(
+decoder.decode(value))`) corrupts characters.
+
+Accumulating into a local `result` also sidesteps the stale-closure trap:
+`reply` from `useState` is frozen for the whole function call, so
+`setReply(reply + chunk)` would never advance. The alternative is the
+functional form, `setReply(prev => prev + chunk)`.
+
 ## System prompt
 
 The instruction that sets the context for the **entire** conversation, not just
