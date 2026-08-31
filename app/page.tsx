@@ -1,11 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
+import { useChat } from "@/hooks/useChat";
 
-// role is "user" | "assistant" on this model. The SDK type also allows
-// "system", but sonnet-4-6 returns 400 for it — the system prompt goes in the
-// top-level `system` param in route.ts instead.
 function renderContent(content: Anthropic.MessageParam["content"]) {
   if (typeof content === "string") return content;
 
@@ -17,80 +15,11 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<Anthropic.MessageParam[]>([]);
-  const [reply, setReply] = useState(""); // the answer still streaming in
-  const [error, setError] = useState("");
-  const [streaming, setStreaming] = useState(false);
+  const { messages, reply, error, streaming, send, stop } = useChat();
 
-  const abortRef = useRef<AbortController | null>(null);
-
-  const stopStreaming = () => abortRef.current?.abort();
-
-  const sendMessage = async () => {
-    if (streaming || !input.trim()) return;
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    const userMessage: Anthropic.MessageParam = { role: "user", content: input };
-    // one local array, two consumers: the state update and the request body
-    const history = [...messages, userMessage];
-
-    setMessages(history);
+  const submit = () => {
+    send(input);
     setInput("");
-    setReply("");
-    setError("");
-    setStreaming(true);
-
-    // declared outside try so finally can read them
-    let answer = "";
-    let completed = false;
-
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history }),
-        signal: controller.signal,
-      });
-
-      // the status locks once streaming starts, so check it here
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          answer += decoder.decode(value, { stream: true });
-          setReply(answer);
-        }
-      }
-
-      completed = true;
-    } catch (err) {
-      // ask the controller whether this was a user stop, instead of guessing
-      // from the shape of the error object
-      if (!controller.signal.aborted) {
-        console.error("Error sending message:", err);
-        setError("Something went wrong. Please try again.");
-      }
-    } finally {
-      // the single commit point: an answer moves from the temp buffer into
-      // history when it finished, or when the user stopped it part-way
-      if ((completed || controller.signal.aborted) && answer.trim()) {
-        setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
-      }
-
-      setReply(""); // it lives in history now — leaving it here shows it twice
-      setStreaming(false);
-      abortRef.current = null;
-    }
   };
 
   const isEmpty = messages.length === 0 && !streaming;
@@ -109,6 +38,14 @@ export default function Home() {
             <div key={i} className="text-zinc-700 dark:text-zinc-300">
               <strong>{msg.role}:</strong>
               <div>{renderContent(msg.content)}</div>
+
+              {msg.stopped && (
+                <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                  <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+                  stopped by you
+                  <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+                </div>
+              )}
             </div>
           ))}
 
@@ -116,7 +53,10 @@ export default function Home() {
           {streaming && (
             <div className="text-zinc-700 dark:text-zinc-300">
               <strong>assistant:</strong>
-              <div>{reply || "..."}</div>
+              <div>
+                {reply}
+                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-400 align-text-bottom" />
+              </div>
             </div>
           )}
 
@@ -128,7 +68,7 @@ export default function Home() {
             className="w-full rounded-md border border-zinc-200 bg-white px-4 py-2 text-zinc-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:text-sm"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
           />
 
           <div className="flex w-full justify-end">
@@ -138,7 +78,7 @@ export default function Home() {
                   ? "bg-red-500 hover:bg-red-600 focus:ring-red-500"
                   : "bg-blue-500 hover:bg-blue-600 focus:ring-blue-500"
               }`}
-              onClick={streaming ? stopStreaming : sendMessage}
+              onClick={streaming ? stop : submit}
             >
               {streaming ? "Stop" : "Send"}
             </button>

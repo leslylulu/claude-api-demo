@@ -339,6 +339,64 @@ Accumulating into a local `result` also sidesteps the stale-closure trap:
 `setReply(reply + chunk)` would never advance. The alternative is the
 functional form, `setReply(prev => prev + chunk)`.
 
+## Stateless vs stateful chat
+
+The Messages API is **stateless** — it remembers nothing between calls, so every
+request resends the whole history. That's why `page.tsx` keeps a `messages[]`
+array and posts all of it each turn.
+
+claude.ai is **stateful**. Its requests go to
+`/chat_conversations/{uuid}/...`, the conversation lives in a database, and the
+client only sends the new message.
+
+|  | claude.ai | this app |
+| --- | --- | --- |
+| History lives | server-side DB | browser memory (gone on refresh) |
+| Sent per turn | just the new message | the entire array |
+| Stopping | `POST .../stop_response` with a `completion_request_id` | close the connection |
+
+### Why claude.ai needs an explicit stop endpoint
+
+**A dropped connection is an ambiguous signal.** The server can't tell apart:
+
+- the user pressed Stop
+- the network blipped
+- the tab was closed / the laptop slept
+
+Those need different reactions — a blip should *not* kill the generation, a
+deliberate stop should. So the intent gets its own request. The
+`completion_request_id` identifies *which* generation to stop, since several
+can be in flight across tabs and devices, and the server still has to persist
+the partial answer so every device sees the same state.
+
+### Why this app doesn't need one
+
+Here the connection **is** the only source of truth:
+
+```
+Stop → fetch abort → connection drops → route.ts cancel() → stream.abort()
+```
+
+No server-side session to keep in sync, no multi-device consistency, so the
+implicit signal is enough. Adding a stop endpoint would first require adding
+server-side conversation storage — solving a problem this app doesn't have.
+
+**The trade-off to know:** a network blip and a deliberate stop are
+indistinguishable here. Wi-Fi drops, generation dies, and the message gets
+labelled "stopped by you" even though it wasn't. Statelessness buys simplicity
+and pays for it with lost intent.
+
+### Consecutive user messages
+
+Stopping before the first token means no assistant message is stored (an empty
+`content` is rejected by the API), so history can hold two `user` messages in a
+row. The API accepts that and merges them into one turn.
+
+claude.ai instead stores the partial answer however short it is, and marks it
+stopped. Matching that means dropping the `answer.trim()` guard and storing
+placeholder text — which then leaks into the next turn's context. No clean
+answer either way.
+
 ## System prompt
 
 The instruction that sets the context for the **entire** conversation, not just

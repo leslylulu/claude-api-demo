@@ -2,6 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic();
 
+// Kept at module scope so the string stays byte-identical across requests —
+// a stable prefix is what prompt caching would need later on.
+const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
+- Answer in the same language the user writes in.
+- Use markdown for structure: headings, lists, tables, code blocks.
+- Be concise. Prefer three short paragraphs over ten.
+- If you are unsure, say so instead of guessing.`;
+
 export async function POST(req: Request) {
 	const { messages } = await req.json();
 	// if role is system, will throw 400 code
@@ -17,9 +25,9 @@ export async function POST(req: Request) {
 
 	const stream = client.messages.stream({
 		model: "claude-sonnet-4-6",
-		max_tokens: 1024,
-		temperature: 0.5, // 0
-		system: "You are a helpful assistant from Claude and model is claude-sonnet-4-6.",
+		max_tokens: 4096,
+		temperature: 0.4, // 0
+		system: SYSTEM_PROMPT,
 		messages: messages
 	});
 
