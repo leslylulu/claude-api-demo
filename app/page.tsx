@@ -1,17 +1,52 @@
 "use client";
-
-import { useState } from "react";
+import { memo, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type Anthropic from "@anthropic-ai/sdk";
-import { useChat } from "@/hooks/useChat";
+import { useChat, type ChatMessage } from "@/hooks/useChat";
+
+// GitHub Flavored Markdown — tables, strikethrough, task lists, autolinks.
+// Plain CommonMark has no table syntax, so without this Claude's tables
+// render as literal pipe characters.
+const remarkPlugins = [remarkGfm];
 
 function renderContent(content: Anthropic.MessageParam["content"]) {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") {
+    return <Markdown remarkPlugins={remarkPlugins}>{content}</Markdown>;
+  }
 
   // TODO: render image / tool_use blocks too
   return content.map((block, i) => (
-    <div key={i}>{block.type === "text" ? block.text : null}</div>
+    <div key={i}>
+      {block.type === "text" ? (
+        <Markdown remarkPlugins={remarkPlugins}>{block.text}</Markdown>
+      ) : null}
+    </div>
   ));
 }
+
+// memo skips the re-render when `message` is referentially unchanged. Appending
+// to the array keeps existing objects identical, so every past message is
+// skipped while a new answer streams in — and markdown parsing is expensive
+// enough to be worth the shallow compare.
+const Message = memo(function Message({ message }: { message: ChatMessage }) {
+  console.log("rendering message ===", message);
+
+  return (
+    <div className="text-zinc-700 dark:text-zinc-300">
+      <strong>{message.role}:</strong>
+      <div>{renderContent(message.content)}</div>
+
+      {message.stopped && (
+        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+          stopped by you
+          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        </div>
+      )}
+    </div>
+  );
+});
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -35,18 +70,7 @@ export default function Home() {
           )}
 
           {messages.map((msg, i) => (
-            <div key={i} className="text-zinc-700 dark:text-zinc-300">
-              <strong>{msg.role}:</strong>
-              <div>{renderContent(msg.content)}</div>
-
-              {msg.stopped && (
-                <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
-                  <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-                  stopped by you
-                  <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-                </div>
-              )}
-            </div>
+            <Message key={i} message={msg} />
           ))}
 
           {/* the in-flight answer, rendered after history so the order stays chronological */}

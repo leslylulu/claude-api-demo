@@ -414,18 +414,36 @@ How to write a good one:
 2. Say what **to do**, not what not to do
 3. Use structure — bullets, numbered lists, tables are easier to follow
 
-## TODO — UI (deferred, logic first)
+## TODO — UI / UX (next session)
 
-Claude answers in Markdown, but `<p>{reply}</p>` renders it as raw text —
-`## headings`, `| tables |`, and `**bold**` all show up as literal characters.
+### Raw markdown is visible for the whole stream
 
-- [ ] Render Markdown instead of plain text (`react-markdown` + `remark-gfm`
-      for tables). Sanitize if the input is ever untrusted.
-- [ ] Syntax highlighting for code blocks
-- [ ] Chat layout — user/assistant bubbles instead of one `<p>`
+The committed history renders through `react-markdown`, but the in-flight
+answer is still plain text, so the user watches `## headings` and `**bold**`
+scroll by and then *snap* into formatting once the stream commits. Worst of
+both: raw syntax the whole time, plus a layout jump at the end.
+
+That plain-text choice was a deliberate perf trade-off — `react-markdown` has
+no internal caching and reparses from scratch on every render. Options:
+
+- [ ] **Render the streaming reply as markdown too.** ~1 parse per chunk
+      (~100 for a long answer). Simplest, probably fine. Half-finished syntax
+      will flicker (an unclosed ``` briefly renders as plain text) — that
+      happens on chatgpt.com and claude.ai too, it isn't a bug to chase.
+- [ ] Or throttle: only re-parse every ~100ms instead of every chunk.
+- [ ] Measure before optimizing — 100 parses may just be fine.
+
+### Styling
+
+- [ ] `@tailwindcss/typography` — installed nothing yet. Preflight zeroes out
+      heading sizes and list bullets, so markdown renders structurally correct
+      but visually flat. Add `@plugin "@tailwindcss/typography";` to
+      `globals.css` and wrap content in `prose dark:prose-invert`.
+- [ ] Syntax highlighting for code blocks (`rehype-highlight`)
+- [ ] Chat layout — user/assistant bubbles, not `<strong>role:</strong>`
 - [ ] `min-h` on the answer area so the page doesn't jump as text streams in
 - [ ] Auto-scroll to the bottom while streaming
-- [ ] Blinking cursor at the end of the streaming text
+- [ ] Remove the `console.log` in `Message` once memo is verified
 
 Smoothness note: the burst-y arrival is the model's real rhythm, not a bug.
 A true typewriter effect needs a client-side render queue that releases
