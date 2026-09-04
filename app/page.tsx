@@ -6,9 +6,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { useChat, type ChatMessage } from "@/hooks/useChat";
 import { summarize } from "@/lib/pricing";
 
-// GitHub Flavored Markdown — tables, strikethrough, task lists, autolinks.
-// Plain CommonMark has no table syntax, so without this Claude's tables
-// render as literal pipe characters.
+// GFM: tables, strikethrough, task list
 const remarkPlugins = [remarkGfm];
 
 function renderContent(content: Anthropic.MessageParam["content"]) {
@@ -26,15 +24,14 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
   ));
 }
 
-// The three prompt-token fields are disjoint and priced differently, so they
-// are shown separately rather than as one "input" number: `cached` is the
-// ~0.1x part, `new` the 1.25x write, `fresh` the full-price remainder.
+// The three prompt-token fields are disjoint and priced differently:
+// cached ~0.1x, new 1.25x (write), fresh 1x. Hence three numbers, not one.
 function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
   const s = summarize(usage);
 
-  // minimum cache size is 1024 tokens,
+  // caching needs a 1024-token minimum prefix, so short chats show zeros
   return (
-    <div className="mt-1 font-mono text-[11px] text-[var(--muted)]">
+    <div className="mt-1 font-mono text-[11px] text-(--muted)">
       {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
       {s.uncached} fresh) → {s.outputTokens} out
       {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
@@ -42,23 +39,22 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
   );
 }
 
-// memo skips the re-render when `message` is referentially unchanged. Appending
-// to the array keeps existing objects identical, so every past message is
-// skipped while a new answer streams in — and markdown parsing is expensive
-// enough to be worth the shallow compare.
-const Message = memo(function Message({ message }: { message: ChatMessage }) {
+// memo: appending keeps past message objects referentially identical, so they
+// skip re-render while a new answer streams. Markdown parsing is worth the compare.
+const Message = memo(function Message({ message, streaming }: { message: ChatMessage, streaming?: boolean }) {
   return (
-    <div className="text-[var(--foreground)]">
+    <div className={`text-foreground`}>
       {
-        message.role === "assistant" && <strong>Assistant</strong>
+        message.role === "assistant" && <strong className="text-xs text-(--muted)">Assistant</strong>
       }
-      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end px-3 py-2 bg-[var(--bubble-user)]" : "items-start p-0"}`}>
-        <div className="prose prose-sm max-w-none">
+      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end px-3 py-2 bg-(--bubble-user)" : "items-start p-0"}`}>
+        {/* w-full: parent is flex-col, items-start shrinks to fit-content. max-w-none: drops prose's 65ch measure. */}
+        <div className={`prose prose-sm w-full max-w-none ${streaming ? "streaming" : ""}`}>
           {renderContent(message.content)}
         </div>
       </div>
 
-      {message.usage && <UsageLine usage={message.usage} />}
+      {message.usage && !streaming && <UsageLine usage={message.usage} />}
 
       {message.stopped && (
         <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
@@ -83,11 +79,11 @@ export default function Home() {
   const isEmpty = messages.length === 0 && !streaming;
 
   return (
-    <div className="flex flex-1 flex-col items-center bg-[var(--background)] font-sans">
+    <div className="flex flex-1 flex-col items-center bg-background font-sans">
       <main className="flex w-full max-w-3xl flex-1 flex-col justify-between px-8 py-16">
         <div className="w-full space-y-4">
           {isEmpty && (
-            <h2 className="text-[var(--muted)]">
+            <h2 className="text-(--muted)">
               Welcome to use the chatbot!
             </h2>
           )}
@@ -96,15 +92,9 @@ export default function Home() {
             <Message key={i} message={msg} />
           ))}
 
-          {/* the in-flight answer, rendered after history so the order stays chronological */}
+          {/* in-flight answer — after history, so order stays chronological */}
           {streaming && (
-            <div className="text-zinc-700 dark:text-zinc-300">
-              <strong>assistant:</strong>
-              <div>
-                {reply}
-                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-400 align-text-bottom" />
-              </div>
-            </div>
+            <Message streaming message={{role: "assistant", content: reply}} />
           )}
 
           {error && <p className="text-red-500">{error}</p>}
@@ -112,7 +102,7 @@ export default function Home() {
 
         <div className="w-full">
           <input
-            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bubble-user)] px-4 py-3 text-[var(--foreground)] outline-none focus:border-[var(--accent)] sm:text-sm"
+            className="w-full rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent) sm:text-sm"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -122,8 +112,8 @@ export default function Home() {
             <button
               className={`mt-4 rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 streaming
-                  ? "bg-[var(--muted)]"
-                  : "bg-[var(--accent)] hover:opacity-90"
+                  ? "bg-(--muted)"
+                  : "bg-(--accent) hover:opacity-90"
               }`}
               onClick={streaming ? stop : submit}
             >
