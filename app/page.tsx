@@ -34,7 +34,7 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 
   // minimum cache size is 1024 tokens,
   return (
-    <div className="mt-1 font-mono text-[11px] text-zinc-400">
+    <div className="mt-1 font-mono text-[11px] text-[var(--muted)]">
       {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
       {s.uncached} fresh) → {s.outputTokens} out
       {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
@@ -48,12 +48,14 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 // enough to be worth the shallow compare.
 const Message = memo(function Message({ message }: { message: ChatMessage }) {
   return (
-    <div className="text-zinc-700 dark:text-zinc-300">
+    <div className="text-[var(--foreground)]">
       {
         message.role === "assistant" && <strong>Assistant</strong>
       }
-      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end p-2 bg-pink-100" : "items-start p-0"}`}>
-        {renderContent(message.content)}
+      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end px-3 py-2 bg-[var(--bubble-user)]" : "items-start p-0"}`}>
+        <div className="prose prose-sm max-w-none">
+          {renderContent(message.content)}
+        </div>
       </div>
 
       {message.usage && <UsageLine usage={message.usage} />}
@@ -81,11 +83,11 @@ export default function Home() {
   const isEmpty = messages.length === 0 && !streaming;
 
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col justify-between py-32 px-16 bg-white dark:bg-black">
+    <div className="flex flex-1 flex-col items-center bg-[var(--background)] font-sans">
+      <main className="flex w-full max-w-3xl flex-1 flex-col justify-between px-8 py-16">
         <div className="w-full space-y-4">
           {isEmpty && (
-            <h2 className="text-zinc-700 dark:text-zinc-300">
+            <h2 className="text-[var(--muted)]">
               Welcome to use the chatbot!
             </h2>
           )}
@@ -110,7 +112,7 @@ export default function Home() {
 
         <div className="w-full">
           <input
-            className="w-full rounded-md border border-zinc-200 bg-white px-4 py-2 text-zinc-900 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 sm:text-sm"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--bubble-user)] px-4 py-3 text-[var(--foreground)] outline-none focus:border-[var(--accent)] sm:text-sm"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -120,8 +122,8 @@ export default function Home() {
             <button
               className={`mt-4 rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 streaming
-                  ? "bg-red-500 hover:bg-red-600 focus:ring-red-500"
-                  : "bg-blue-500 hover:bg-blue-600 focus:ring-blue-500"
+                  ? "bg-[var(--muted)]"
+                  : "bg-[var(--accent)] hover:opacity-90"
               }`}
               onClick={streaming ? stop : submit}
             >
