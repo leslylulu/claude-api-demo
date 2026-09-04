@@ -1,9 +1,14 @@
 import { useRef, useState } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
+import type { UsageInfo } from "@/lib/pricing";
 
 // `stopped` is UI metadata, not part of the API payload — it has to be
 // stripped before the message is sent, or the API rejects the extra field.
-export type ChatMessage = Anthropic.MessageParam & { stopped?: boolean };
+// `usage` is the same: what that turn cost, kept for display only.
+export type ChatMessage = Anthropic.MessageParam & {
+  stopped?: boolean;
+  usage?: UsageInfo;
+};
 
 const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
   messages.map(({ role, content }) => ({ role, content }));
@@ -35,6 +40,7 @@ export function useChat() {
 
     // declared outside try so finally can read them
     let answer = "";
+    let usage: UsageInfo | undefined;
     let completed = false;
 
     try {
@@ -53,13 +59,29 @@ export function useChat() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
+      // NDJSON and with frame
+      let buffer = "";
+
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
 
-          answer += decoder.decode(value, { stream: true });
-          setReply(answer);
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? ""; // the trailing partial line
+          for (const line of lines) {
+            if (!line) continue;
+            const frame = JSON.parse(line);
+
+            if (frame.type === "text") {
+              answer += frame.text;
+              setReply(answer);
+            } else if (frame.type === "usage") {
+              usage = frame;
+            }
+          }
         }
       }
 
@@ -81,6 +103,9 @@ export function useChat() {
             role: "assistant",
             content: answer,
             stopped: controller.signal.aborted,
+            // absent on an aborted turn — the usage frame is the last thing
+            // written, so stopping early means it never arrived
+            usage,
           },
         ]);
       }

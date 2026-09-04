@@ -414,6 +414,160 @@ How to write a good one:
 2. Say what **to do**, not what not to do
 3. Use structure — bullets, numbered lists, tables are easier to follow
 
+## Prompt caching + token counting
+
+### The wire format had to change first
+
+Usage totals only exist *after* the last token. Headers are locked once the
+first byte ships, so there was nowhere to put them — plain text can carry the
+answer and nothing else.
+
+Fix: **NDJSON** (`application/x-ndjson`) — one JSON object per line, two frame
+types. `JSON.stringify` escapes newlines inside strings, so a raw `\n` is
+unambiguously a separator and can never appear inside a frame.
+
+```ts
+type Frame =
+	| { type: "text"; text: string }
+	| { type: "usage"; model: string; stop_reason: ...; usage: Anthropic.Usage };
+
+const frame = (f: Frame) => encoder.encode(JSON.stringify(f) + "\n");
+```
+
+This is the "SSE" row of the alternatives table above, minus the `event:` /
+`data:` ceremony and auto-reconnect. Take real SSE when you want those.
+
+### Framing means the client needs a buffer
+
+The network hands you arbitrary byte chunks. One chunk can hold three lines,
+or end mid-line. **Only the text after the last `\n` is incomplete:**
+
+```ts
+let buffer = "";
+
+buffer += decoder.decode(value, { stream: true });
+const lines = buffer.split("\n");
+buffer = lines.pop() ?? ""; // trailing partial line — wait for the rest
+
+for (const line of lines) {
+	if (!line) continue;
+	const frame = JSON.parse(line);
+	if (frame.type === "text") { answer += frame.text; setReply(answer); }
+	else if (frame.type === "usage") { usage = frame; }
+}
+```
+
+Two decoders now, stacked: `TextDecoder` buffers partial *bytes*, this buffers
+partial *lines*. Skipping the second one throws `Unexpected end of JSON input`
+— only on long answers, never in a short local test.
+
+### One line enables caching
+
+```ts
+const stream = client.messages.stream({
+	model: MODEL,
+	cache_control: { type: "ephemeral" }, // top-level = automatic
+	system: SYSTEM_PROMPT,
+	messages,
+});
+```
+
+Top-level `cache_control` auto-places one breakpoint on the last cacheable
+block — which, as the array grows, is always the newest turn. So each request
+reads the whole prior conversation and writes only the delta. The manual
+equivalent is `cache_control` on `messages.at(-1)`; automatic needs no
+bookkeeping and is the right default for multi-turn chat.
+
+Reach for explicit breakpoints when the prompt **ends** in per-request content
+(retrieved rows, a one-off question) — the automatic breakpoint lands after
+that unique tail, so every request pays the write premium on bytes nobody ever
+reads back. Then put the marker at the end of the *shared* part instead.
+
+### It's a prefix match — that's the whole model
+
+Render order is `tools` → `system` → `messages`. One changed byte anywhere in
+the prefix invalidates everything after it. So the silent killers all live at
+the front:
+
+| Anti-pattern | Why it kills the cache |
+| --- | --- |
+| `Date.now()` / a UUID in the system prompt | prefix differs every request |
+| `if (flag) system += ...` | each flag combo is a distinct prefix |
+| `JSON.stringify` over an unordered object | bytes differ run to run |
+| adding/reordering a tool mid-conversation | tools render at position 0 |
+| switching models mid-conversation | caches are model-scoped |
+
+That's why `SYSTEM_PROMPT` is a module-scope const and not a template built
+per request. To inject something dynamic, put it *after* the history — never
+in `system`.
+
+### The three token fields are disjoint
+
+`input_tokens` is the **uncached remainder only**. Real prompt size is the sum:
+
+```
+promptTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+```
+
+An agent that ran for an hour showing `input_tokens: 4000` is not a small
+prompt — it's a well-cached one. Reading that field alone is the classic
+misread.
+
+### Measured on this app
+
+Two requests sharing a ~3.6K-token prefix:
+
+| | `input` | `cache_creation` | `cache_read` |
+| --- | ---: | ---: | ---: |
+| cold | 3 | 3,643 | 0 |
+| warm | 3 | 15 | 3,643 |
+
+That second row is the **healthy-loop signature**: read everything so far,
+write only what the last turn added. Effective input on turn 2 is
+`3 + 3643×0.1 + 15×1.25 ≈ 386` billed tokens instead of 3,661 — ~89% off.
+
+If `cache_creation` is near the full conversation size on *every* request, the
+prefix is being rewritten upstream. If `cache_read` is flat zero, see the
+anti-pattern table.
+
+### Economics
+
+Reads cost **0.1×** base input. Writes cost **1.25×** (5-min TTL) or **2×**
+(1-hour TTL). So a 5-minute entry breaks even on the second request
+(1.25 + 0.1 = 1.35 vs 2.0 uncached); a 1-hour entry needs a third.
+
+A read **refreshes the timer for free**, measured from the *start* of the
+request. So continuous traffic keeps a 5-minute entry alive forever, and the
+1-hour TTL buys nothing but a doubled write price. It only pays in the 5–60
+minute gap — a user who replies after 20 minutes.
+
+### The gotcha: minimum cacheable prefix
+
+Below the minimum, caching **silently does nothing** — no error, just
+`cache_creation_input_tokens: 0`. And the minimum is *not* monotonic across
+generations:
+
+| Model | Minimum |
+| --- | ---: |
+| Opus 5 | 512 |
+| Sonnet 5, **Sonnet 4.6** | 1,024 |
+| Opus 4.7 | 2,048 |
+| Opus 4.6, Haiku 4.5 | 4,096 |
+
+Our `SYSTEM_PROMPT` is ~80 tokens. **Caching it alone would never have done
+anything** — the win only exists because the breakpoint sits on the growing
+conversation. Short chats in this app will still show all zeros; that's
+correct, not a bug. Test with a long prefix (above) or don't trust the result.
+
+### TODO
+
+- [ ] Verify caching still works after *any* change to prompt assembly. The
+      costly failure mode is silent: requests keep succeeding, the bill is
+      just higher. An assertion that a second identical request has
+      `cache_read_input_tokens > 0` is worth more than a one-time eyeball.
+- [ ] Session total, not just per-message — sum usage across the chat.
+- [ ] `messages.countTokens()` to price a request *before* sending it.
+
 ## TODO — UI / UX (next session)
 
 ### Raw markdown is visible for the whole stream

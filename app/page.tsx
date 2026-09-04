@@ -4,6 +4,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type Anthropic from "@anthropic-ai/sdk";
 import { useChat, type ChatMessage } from "@/hooks/useChat";
+import { summarize } from "@/lib/pricing";
 
 // GitHub Flavored Markdown — tables, strikethrough, task lists, autolinks.
 // Plain CommonMark has no table syntax, so without this Claude's tables
@@ -25,17 +26,37 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
   ));
 }
 
+// The three prompt-token fields are disjoint and priced differently, so they
+// are shown separately rather than as one "input" number: `cached` is the
+// ~0.1x part, `new` the 1.25x write, `fresh` the full-price remainder.
+function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
+  const s = summarize(usage);
+
+  // minimum cache size is 1024 tokens,
+  return (
+    <div className="mt-1 font-mono text-[11px] text-zinc-400">
+      {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
+      {s.uncached} fresh) → {s.outputTokens} out
+      {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
+    </div>
+  );
+}
+
 // memo skips the re-render when `message` is referentially unchanged. Appending
 // to the array keeps existing objects identical, so every past message is
 // skipped while a new answer streams in — and markdown parsing is expensive
 // enough to be worth the shallow compare.
 const Message = memo(function Message({ message }: { message: ChatMessage }) {
-  console.log("rendering message ===", message);
-
   return (
     <div className="text-zinc-700 dark:text-zinc-300">
-      <strong>{message.role}:</strong>
-      <div>{renderContent(message.content)}</div>
+      {
+        message.role === "assistant" && <strong>Assistant</strong>
+      }
+      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end p-2 bg-pink-100" : "items-start p-0"}`}>
+        {renderContent(message.content)}
+      </div>
+
+      {message.usage && <UsageLine usage={message.usage} />}
 
       {message.stopped && (
         <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
