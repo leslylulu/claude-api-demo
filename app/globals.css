@@ -141,3 +141,28 @@ body {
     opacity: 0;
   }
 }
+
+/* Scrollbar: invisible at rest, revealed on hover  */
+.scroll-slim {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent; /* thumb, track */
+}
+.scroll-slim:hover {
+  /* scrollbar-color: var(--border) transparent; */
+  background: color-mix(in srgb, var(--border) 10%, transparent);
+}
+
+/* WebKit predates the standard properties above and ignores them in older Chrome and Safari. 
+   Same effect, vendor syntax. */
+.scroll-slim::-webkit-scrollbar {
+  width: 4px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+}
+.scroll-slim:hover::-webkit-scrollbar-thumb {
+  /* background: var(--border); */
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+}

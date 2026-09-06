@@ -1,5 +1,5 @@
 "use client";
-import { memo, useState } from "react";
+import { memo, useState, useEffect, useRef } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type Anthropic from "@anthropic-ai/sdk";
@@ -31,7 +31,7 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 
   // caching needs a 1024-token minimum prefix, so short chats show zeros
   return (
-    <div className="mt-1 font-mono text-[11px] text-(--muted)">
+    <div className="font-mono text-[11px] text-(--muted)">
       {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
       {s.uncached} fresh) → {s.outputTokens} out
       {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
@@ -43,13 +43,9 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 // skip re-render while a new answer streams. Markdown parsing is worth the compare.
 const Message = memo(function Message({ message, streaming }: { message: ChatMessage, streaming?: boolean }) {
   return (
-    <div className={`text-foreground`}>
-      {
-        message.role === "assistant" && <strong className="text-xs text-(--muted)">Assistant</strong>
-      }
-      <div className={`flex flex-col rounded-lg ${message.role === "user" ? "items-end px-3 py-2 bg-(--bubble-user)" : "items-start p-0"}`}>
-        {/* w-full: parent is flex-col, items-start shrinks to fit-content. max-w-none: drops prose's 65ch measure. */}
-        <div className={`prose prose-sm w-full max-w-none ${streaming ? "streaming" : ""}`}>
+    <div className={`flex flex-col gap-1 ${message.role === "user" ? "items-end" : ""}`}>
+      <div className={`${message.role === "user" ? "bg-(--bubble-user) max-w-[80%] px-4 py-2 rounded-2xl" : ""}`}>
+        <div className={`prose prose-sm max-w-none ${streaming ? "streaming" : ""}`}>
           {renderContent(message.content)}
         </div>
       </div>
@@ -57,10 +53,10 @@ const Message = memo(function Message({ message, streaming }: { message: ChatMes
       {message.usage && !streaming && <UsageLine usage={message.usage} />}
 
       {message.stopped && (
-        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+        <div className="flex items-center gap-2 text-xs text-(--muted)">
+          <span className="h-px flex-1 bg-(--border)" />
           stopped by you
-          <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+          <span className="h-px flex-1 bg-(--border)" />
         </div>
       )}
     </div>
@@ -70,18 +66,52 @@ const Message = memo(function Message({ message, streaming }: { message: ChatMes
 export default function Home() {
   const [input, setInput] = useState("");
   const { messages, reply, error, streaming, send, stop } = useChat();
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  //* does the user still want to follow along and no need for re-rendering!
+  const stickToBottom = useRef(true);
+
+  useEffect(() => {
+    // fixed while scrolling, but if the user scrolls up and then a new message arrives,
+    //  we don't want to yank them back down. So we only scroll if they were already at the bottom.
+
+    // > 0 means the user has scrolled up, so we don't scroll down automatically.
+    if (stickToBottom.current) bottomRef.current?.scrollIntoView();
+  }, [reply, messages]);
 
   const submit = () => {
     send(input);
     setInput("");
   };
+  
+
+  // records state, scrolls nothing
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    // clientHeight is the viewport height, 
+    // scrollHeight is the total height of the content, 
+    // and scrollTop is how far we've scrolled from the top.
+
+    // If the user is within 100px of the bottom, we consider them to be "sticking to the bottom".
+    stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
+    // console.log("scrollTop:", scrollTop, "scrollHeight:", scrollHeight, "clientHeight:", clientHeight, scrollHeight - scrollTop - clientHeight, "stickToBottom:", stickToBottom.current);
+  };
 
   const isEmpty = messages.length === 0 && !streaming;
 
   return (
-    <div className="flex flex-1 flex-col items-center bg-background font-sans">
-      <main className="flex w-full max-w-3xl flex-1 flex-col justify-between px-8 py-16">
-        <div className="w-full space-y-4">
+    <div className="flex flex-1 flex-col items-center bg-gray-50 font-sans">
+      {/* dvh = dynamic viewport height */}
+      <main className="flex w-full h-dvh max-w-3xl flex-col bg-white">
+
+        <div 
+          ref={scrollRef} 
+          onScroll={handleScroll} 
+          className="w-full space-y-4 flex-1 overflow-y-auto overscroll-contain px-8 py-16"
+        >
           {isEmpty && (
             <h2 className="text-(--muted)">
               Welcome to use the chatbot!
@@ -97,10 +127,14 @@ export default function Home() {
             <Message streaming message={{role: "assistant", content: reply}} />
           )}
 
+
           {error && <p className="text-red-500">{error}</p>}
+
+          <div ref={bottomRef} />
+
         </div>
 
-        <div className="w-full">
+        <div className="flex flex-col gap-2 px-8 pb-8">
           <input
             className="w-full rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent) sm:text-sm"
             value={input}
@@ -110,7 +144,7 @@ export default function Home() {
 
           <div className="flex w-full justify-end">
             <button
-              className={`mt-4 rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 streaming
                   ? "bg-(--muted)"
                   : "bg-(--accent) hover:opacity-90"
