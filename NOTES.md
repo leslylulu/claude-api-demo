@@ -263,10 +263,14 @@ if (final.stop_reason === "max_tokens") {
 Never set `Content-Length` — a stream doesn't know its own length, and it
 conflicts with chunked transfer encoding.
 
-### Open question
+### Open question — answered
 
 Error status codes: once the first byte is sent the status is locked at 200.
 Anything that can fail must be validated **before** `.stream()` is called.
+
+Except `.stream()` is lazy — the request only fires on the first iteration,
+which is already inside `start()`, so "before" doesn't exist for upstream
+errors. See *Errors have to travel in-band* below.
 
 ## page.tsx
 
@@ -568,37 +572,492 @@ correct, not a bug. Test with a long prefix (above) or don't trust the result.
 - [ ] Session total, not just per-message — sum usage across the chat.
 - [ ] `messages.countTokens()` to price a request *before* sending it.
 
-## TODO — UI / UX (next session)
+## UI / UX — what shipped
 
-### Raw markdown is visible for the whole stream
+### The streaming reply and the committed one must render identically
 
-The committed history renders through `react-markdown`, but the in-flight
-answer is still plain text, so the user watches `## headings` and `**bold**`
-scroll by and then *snap* into formatting once the stream commits. Worst of
-both: raw syntax the whole time, plus a layout jump at the end.
+The in-flight answer used to be plain text while history went through
+`react-markdown`, so raw `##` scrolled past for the whole stream and then
+snapped into formatting. The snap was the worse half: the two paths emitted
+different DOM, so the handoff recomputed heights and shifted the page — CLS,
+one of the Core Web Vitals.
 
-That plain-text choice was a deliberate perf trade-off — `react-markdown` has
-no internal caching and reparses from scratch on every render. Options:
+Fix: route both through the same `Message` component.
 
-- [ ] **Render the streaming reply as markdown too.** ~1 parse per chunk
-      (~100 for a long answer). Simplest, probably fine. Half-finished syntax
-      will flicker (an unclosed ``` briefly renders as plain text) — that
-      happens on chatgpt.com and claude.ai too, it isn't a bug to chase.
-- [ ] Or throttle: only re-parse every ~100ms instead of every chunk.
-- [ ] Measure before optimizing — 100 parses may just be fine.
+```jsx
+{streaming && (
+  <Message streaming message={{ role: "assistant", content: reply }} />
+)}
+```
 
-### Styling
+Nothing changes on screen at commit because nothing changes in the DOM — only
+where the data came from. React 18's automatic batching covers the three
+`setState` calls in `useChat`'s `finally`, so there is no frame showing the
+answer twice or an orphaned cursor. (React 17 batched only inside event
+handlers; code after an `await` was not batched, and this would have flickered.)
 
-- [ ] `@tailwindcss/typography` — installed nothing yet. Preflight zeroes out
-      heading sizes and list bullets, so markdown renders structurally correct
-      but visually flat. Add `@plugin "@tailwindcss/typography";` to
-      `globals.css` and wrap content in `prose dark:prose-invert`.
-- [ ] Syntax highlighting for code blocks (`rehype-highlight`)
-- [ ] Chat layout — user/assistant bubbles, not `<strong>role:</strong>`
-- [ ] `min-h` on the answer area so the page doesn't jump as text streams in
-- [ ] Auto-scroll to the bottom while streaming
-- [ ] Remove the `console.log` in `Message` once memo is verified
+The feared cost — `react-markdown` reparsing on every chunk, ~100 parses for a
+long answer — is not measurable. Don't throttle until it is.
 
-Smoothness note: the burst-y arrival is the model's real rhythm, not a bug.
-A true typewriter effect needs a client-side render queue that releases
-characters at a fixed rate — pure UI sugar, unrelated to the stream itself.
+### The cursor has to be a pseudo-element
+
+markdown emits block-level tags. A block and an inline `<span>` cannot share a
+line, so a real cursor element drops to the next row. `::after` lives inside
+the block's own inline formatting context and sits flush against the last
+character.
+
+```css
+.streaming > :last-child::after,
+.streaming:empty::after {
+  content: "";
+  display: inline-block; /* an inline box ignores width/height */
+  width: 0.5em;
+  height: 1em; /* em tracks font-size, so it grows inside a heading */
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  background: currentColor; /* follows the text color into dark mode */
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+```
+
+`steps()` snaps between states; default easing reads as a breathing glow, not a
+cursor. `:empty` covers the gap before the first token arrives.
+
+### `prose` is for HTML you don't control
+
+Preflight zeroes native tag styles — right for hand-written components, wrong
+for `react-markdown` output, whose tags can't be given a class. The typography
+plugin styles them from the container: `.prose :where(h2):not(...)`, targeting
+*descendants*, so `prose` goes on the wrapper, never on the tag itself.
+
+Tailwind v4 registers it in CSS, not a config file:
+
+```css
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+```
+
+Three defaults had to be overridden for a chat column:
+
+- Heading scale — `h1` at 2.2em anchors an article page; in a 700px column it
+  shouts. Compressed toward body size, weight carries the hierarchy.
+- Inline code inside a heading — the plugin drops it to 0.875em and leaves the
+  weight alone: two fonts, two sizes, two weights in one line.
+- Literal backticks around inline code (`code::before` / `::after`) — readable
+  in print, noise in a chat.
+
+Override with `:is()`, not `:where()`. The plugin uses `:where()` deliberately
+so its rules have zero specificity and lose to anything. `:is()` takes the
+highest specificity inside it, so `.prose :is(h1, h2)` is (0,1,1) and beats
+`.prose :where(h1)` at (0,1,0). Matching `:where()` would leave the winner
+decided by stylesheet order — fragile.
+
+### Colors as tokens, dark mode as reassignment
+
+Every color lives in one `:root` block; `page.tsx` holds no literal color.
+Swapping the accent from terracotta to navy touched `globals.css` alone.
+
+Dark mode redefines the same variables and repeats no rule — and does **not**
+reuse the accent: `#0e21a0` on a dark ground is ~1.3:1, invisible. A dark
+palette lightens its saturated colors; it doesn't just swap fg and bg.
+
+Neutrals are tinted toward the accent's hue (`#16182b`, not `#171717`). Per
+color the difference is invisible; across the set it's what reads as designed.
+
+Because the variables own dark mode, `dark:prose-invert` had to go — it would
+be a second, conflicting source of truth.
+
+### `justify-between` only works when height is independent of content
+
+The composer was pushed to the bottom of `main` with `justify-between`, but
+`main` grows with the messages, so after 20 turns the input sat 5000px down the
+document. `flex-1` guarantees *at least* the viewport; it doesn't cap.
+
+Scrolling belongs to the list, not the page:
+
+```
+main            h-dvh flex flex-col          <- height pinned to the viewport
+├─ div          flex-1 overflow-y-auto       <- only this scrolls
+└─ div          composer, normal flow        <- lands at the bottom for free
+```
+
+`h-dvh`, not `h-screen`: `100vh` sits under the mobile address bar.
+
+`position: fixed` is the wrong repair — it leaves the flow, so the list doesn't
+know 140px is floating over it and the last message hides underneath.
+
+### Auto-scroll has to yield to the user
+
+Unconditional `scrollIntoView` yanks the reader back to the bottom on the next
+token whenever they scroll up to re-read. Only follow if they were already
+near the bottom:
+
+```ts
+// a value ref, not a DOM ref: "does the user still want to follow along".
+// useState would re-render — and re-parse markdown — on every scroll frame.
+const stickToBottom = useRef(true);
+
+const handleScroll = () => {
+  const el = scrollRef.current;
+  if (!el) return;
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  // leeway absorbs subpixel rounding and scroll momentum; a strict === is flaky
+  stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
+};
+
+useEffect(() => {
+  if (stickToBottom.current) bottomRef.current?.scrollIntoView();
+}, [reply, messages]);
+```
+
+`scrollHeight - scrollTop - clientHeight` is how much is left below. The
+sentinel — an empty `<div>` marking the end — is declarative: name the target,
+let the browser compute the number. (Same pattern as an `IntersectionObserver`
+sentinel for infinite scroll.)
+
+`overscroll-behavior: contain` stops scroll chaining at the boundary, which
+also blocks mobile pull-to-refresh from wiping the conversation.
+
+Never `behavior: "smooth"` while streaming — dozens of animations per second
+interrupt each other and never catch up.
+
+### An effect's deps decide *when*, not *whether*
+
+Auto-grow initially lived in the scroll effect, keyed on `[reply, messages]`.
+Typing changes neither, so it only ran when a reply arrived. Correct code that
+never runs at the right time. One effect, one concern, one dep list:
+
+```ts
+// scrollHeight never reports less than the current height, so the box could
+// only ever grow without the reset-to-auto first. The pair is load-bearing.
+useEffect(() => {
+  const el = textareaRef.current;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}, [input]);
+```
+
+`field-sizing: content` will replace both lines once Safari ships it.
+
+### Enter during an IME preedit isn't yours
+
+Typing `nihao` opens a candidate list; Enter there commits the raw pinyin. The
+`keydown` still reaches the handler, so without a guard the message is sent —
+carrying the *previous* value, since React state hasn't updated.
+
+```ts
+const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // Enter during an IME preedit commits the raw pinyin to the field — the key
+  // never meant "send". React state also still holds the previous value here,
+  // so submitting would post the message one keystroke stale.
+  if (e.nativeEvent.isComposing) return;
+
+  // Shift+Enter falls through to the textarea's own newline handling
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault(); // otherwise the newline is inserted before we clear
+    submit();
+  }
+};
+```
+
+Space selects a candidate, not Enter — the guard is about the preedit state
+being open, not about the selection key.
+
+`keyCode === 229` is the pre-`isComposing` version of this check; recognize it
+in old code, don't write it. Safari used to fire `keydown` *after*
+`compositionend`, so `isComposing` was already false — the reason older
+libraries track `onCompositionStart`/`End` in a ref instead. Fixed now; if a
+bug is Safari-only, suspect event ordering first.
+
+Also: `disabled` guards the *Send* half only. Disabling the button while
+streaming kills Stop exactly when it's most wanted.
+
+### Scrollbars: transparent, not hidden
+
+`display: none` removes the only cue for how far through a long answer you are.
+Transparent at rest, visible on hover keeps the information and drops the
+noise. `scrollbar-gutter: stable` reserves the track so content doesn't shift
+sideways the moment a reply grows tall enough to overflow.
+
+`scrollbar-width` / `scrollbar-color` are standard; `::-webkit-scrollbar` is
+still needed for older Safari. One of the few places vendor syntax survives.
+
+---
+
+## Model migration: removed parameters, not missing models
+
+Switching `claude-sonnet-4-6` -> `claude-sonnet-5` returned:
+
+```
+400 invalid_request_error: `temperature` is deprecated for this model.
+```
+
+The Claude 5 family rejects all sampling parameters — `temperature`, `top_p`,
+`top_k`. Adaptive thinking decides depth itself and hand-tuned sampling fights
+it. Shape output through the system prompt, `output_config.effort`
+(`low`|`medium`|`high`|`xhigh`|`max`), or structured outputs instead.
+
+Removed in the same generation: `budget_tokens` (superseded by `effort`) and
+assistant prefill.
+
+**The upgrade failure mode is a stale parameter, not a missing model.** Read
+the migration notes before changing a model id.
+
+---
+
+## Errors have to travel in-band
+
+`client.messages.stream()` is lazy: the HTTP request fires on the first
+iteration, which happens inside `ReadableStream.start()` — after the 200
+headers have shipped. `controller.error()` there severs the connection, and the
+browser sees a bare `TypeError: Failed to fetch`. A bad parameter, a rate
+limit, and an exhausted balance all surfaced as one generic message.
+
+The status code is spent once. The stream can carry any number of typed events.
+
+```ts
+} catch (err) {
+  // controller.error() severs the connection: the browser sees a bare
+  // network failure with no status and no body. Send the reason as a
+  // frame and close cleanly instead.
+  console.error("chat stream failed:", err);
+  controller.enqueue(frame({ type: "error", message: apiErrorMessage(err) }));
+  controller.close();
+}
+```
+
+The client `throw`s on receipt so the existing abort-vs-error branch and the
+commit path in `finally` handle it unchanged — reuse the error path, don't open
+a second one.
+
+`APIError` carries two different things: `err.message` is the status plus the
+whole raw JSON body (for logs), and `err.error` is the parsed payload whose
+`.error.message` is the human sentence (for users).
+
+```ts
+// err.message on an APIError is the status plus the whole raw JSON body. The
+// human-readable sentence lives in the parsed payload; dig it out.
+const apiErrorMessage = (err: unknown) => {
+  if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
+  const body = err.error as { error?: { message?: string } } | undefined;
+  return `${err.status}: ${body?.error?.message ?? err.message}`;
+};
+```
+
+**This is what a frame protocol buys over a bare text stream.**
+
+---
+
+## Tool use
+
+### The model never executes anything
+
+It stops and says what it wants called. One exchange is **two API requests**:
+
+```
+1. you -> Claude:  messages + tools
+2. Claude -> you:  stop_reason: "tool_use"
+                   content: [{ type: "tool_use", id: "toolu_01A",
+                               name: "get_weather", input: { city: "Tokyo" } }]
+3. you:            run get_weather("Tokyo") yourself
+4. you -> Claude:  history
+                   + { role: "assistant", content: <step 2's content, whole> }
+                   + { role: "user", content: [{ type: "tool_result",
+                       tool_use_id: "toolu_01A", content: "..." }] }
+5. Claude -> you:  "Tokyo is 18C and sunny."  stop_reason: "end_turn"
+```
+
+An agent is this loop, automated until `stop_reason` stops being `"tool_use"`.
+
+Three rules that produce a 400 when broken:
+
+- `tool_use_id` must match exactly — one turn can carry several calls.
+- `tool_result` goes in a **user** message. Counterintuitive: the developer
+  produced it, but anything not generated by the model is user input.
+- The assistant message replays the **whole `content` array**, not just text.
+  Drop the `tool_use` block and the `tool_result` references a call that,
+  as far as the API can see, never happened.
+
+### The route becomes a loop
+
+`stream` stops being a module-level constant and becomes a per-round local; a
+`let currentStream` outside the loop is what `cancel()` can still reach.
+
+```ts
+const history: Anthropic.MessageCreateParams["messages"] = [...messages];
+
+for (let round = 0; round < MAX_ROUNDS; round++) {
+  const stream = client.messages.stream({ ...params, tools: TOOLS, messages: history });
+  currentStream = stream;
+
+  for await (const event of stream) { /* forward text_delta */ }
+  const final = await stream.finalMessage();
+
+  if (final.stop_reason !== "tool_use") {
+    // the only successful exit
+    controller.enqueue(frame({ type: "usage", ... }));
+    controller.close();
+    return;
+  }
+
+  const calls = final.content.filter(
+    (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+  );
+
+  const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
+    calls.map(async (call) => ({
+      type: "tool_result" as const,
+      tool_use_id: call.id,
+      content: await runTool(call.name, call.input),
+    }))
+  );
+
+  history.push({ role: "assistant", content: final.content });
+  history.push({ role: "user", content: results });  // all results, ONE message
+}
+```
+
+Every round takes exactly one of two exits: `return` (answer) or fall through
+to the next iteration (tool request). Splitting those two paths across the
+inside and outside of the loop is what made the first attempt unreadable.
+
+`controller.close()` may run once per request. It appears in three mutually
+exclusive places: the terminal branch, the round-limit fallback, and `catch`.
+
+`Promise.all`, not sequential `await` — the model may ask for two cities at
+once and serial execution doubles the wait for nothing.
+
+`MAX_ROUNDS` is **not optional**. A model that keeps calling tools without
+converging bills forever, and nothing else stops it. Falling out of the loop
+needs its own error frame and `close()`, or the stream hangs until timeout.
+
+### Usage has to accumulate
+
+`final.usage` covers the last request only. Without carrying totals across
+rounds the displayed cost silently under-reports — the tool rounds vanish.
+
+```ts
+const totals = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_creation_input_tokens: 0,
+  cache_read_input_tokens: 0
+};
+// per round:
+totals.input_tokens += final.usage.input_tokens;
+totals.output_tokens += final.usage.output_tokens;
+totals.cache_creation_input_tokens += final.usage.cache_creation_input_tokens ?? 0;
+totals.cache_read_input_tokens += final.usage.cache_read_input_tokens ?? 0;
+// on the terminal branch:
+usage: { ...final.usage, ...totals }   // spread order matters
+```
+
+### `TOOLS` belongs at module scope
+
+Tools render at the very front of the prompt — before `system`, before
+`messages`. One changed byte invalidates the cache for everything behind it.
+Same rule as `SYSTEM_PROMPT`.
+
+`description` is not a comment; it is the model's entire spec for when to call
+the tool. "Get the weather" is not enough — state what it does, when to reach
+for it, and the argument format. Write it in English: it is prompt text.
+
+### Event anatomy, observed
+
+Asking for two cities at once produced:
+
+```
+message_start
+content_block_start  index 0                      <- text
+content_block_delta  index 0  x2
+content_block_stop   index 0
+content_block_start  index 1  tool_use + id       <- first call
+content_block_delta  index 1  x3
+content_block_stop   index 1
+content_block_start  index 2  tool_use + id       <- second call, same message
+content_block_delta  index 2  x3
+content_block_stop   index 2
+message_delta        stop_reason: "tool_use"
+message_stop
+--- round 2 ---
+message_start
+content_block_start  index 0                      <- text only
+content_block_delta  index 0  x3
+content_block_stop   index 0
+message_delta
+message_stop
+```
+
+- `index` is the position in `content[]`. Round 1 held three blocks: a text
+  preamble plus two parallel `tool_use` calls in **one** message.
+- The deltas differ by block: `text_delta` at index 0, `input_json_delta` at
+  1 and 2 — **tool arguments stream as JSON fragments** (`{"city`, `": "Tok`,
+  `yo"}`). The existing `event.delta.type === "text_delta"` check is what keeps
+  half-built JSON out of the UI.
+- Arguments are therefore unreadable mid-stream. `finalMessage()` reassembles
+  the fragments; that's what it's for.
+- `message_delta` carries `stop_reason` and cumulative output tokens;
+  `message_stop` is a bare terminator.
+
+Round 1's text preamble and round 2's answer both reach the same client buffer
+and concatenate — correct, and what claude.ai does. What's missing is a visual
+marker between them, which is the job of the `tool_use` frame.
+
+### Server-local history is lost on the next turn
+
+The loop's `tool_use` / `tool_result` messages live in a request-scoped array.
+The client only ever received text, so its `messages` has no record of them —
+next turn, Claude can't answer "which city did you look up?"
+
+That is the price of a stateless server: **context produced inside one request
+is gone unless it's handed to the client.** Fixing it means new frames carrying
+the authoritative `content` block arrays, which splits the protocol in two:
+
+| | display frames | commit frames |
+|---|---|---|
+| granularity | one per token | one per round |
+| payload | text fragment | full `ContentBlock[]` |
+| consumer | `setReply()` | `setMessages()` |
+
+`ChatMessage` already extends `Anthropic.MessageParam`, whose `content` is
+`string | ContentBlockParam[]`, and `renderContent` already branches on the
+array case. Mostly filling in a TODO, not a rewrite.
+
+---
+
+## TODO
+
+### Tool use
+
+- [ ] Render the `tool_use` frame in the UI — the call is invisible today, and
+      the gap between the preamble and the answer is a silent multi-second wait.
+- [ ] Commit frames so tool blocks survive into the next turn (above).
+- [ ] A second tool, to see how the model picks between them.
+- [ ] A tool that can fail — return the error as a `tool_result` and let the
+      model recover, rather than throwing and killing the stream.
+
+### Caching
+
+- [ ] Verify caching still works after *any* change to prompt assembly. The
+      costly failure mode is silent: requests keep succeeding, the bill is
+      just higher. An assertion that a second identical request has
+      `cache_read_input_tokens > 0` is worth more than a one-time eyeball.
+      Tool definitions now sit in front of the prefix — one more thing that
+      invalidates everything when edited.
+- [ ] Session total, not just per-message — sum usage across the chat.
+- [ ] `messages.countTokens()` to price a request *before* sending it.
+
+### Before deploying publicly
+
+- [ ] Spend cap in the Anthropic Console. Last line of defense — a public demo
+      spends the owner's money on every visitor.
+- [ ] Per-IP rate limiting.
+- [ ] Consider `output_config: { effort: "low" }` and a smaller `max_tokens`.
+
+### Polish
+
+- [ ] Syntax highlighting for code blocks (`rehype-highlight`).
+- [ ] A "new conversation" control.
+- [ ] `key={i}` in the message list — safe while the array is append-only,
+      still not a habit worth keeping.
