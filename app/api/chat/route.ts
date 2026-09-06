@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic();
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = "claude-sonnet-5";
 
 // Kept at module scope so the string stays byte-identical across requests —
 // a stable prefix is what prompt caching needs. Never interpolate a date, a
@@ -24,7 +24,16 @@ type Frame =
 			model: string;
 			stop_reason: Anthropic.Message["stop_reason"];
 			usage: Anthropic.Usage;
-	};
+		}
+	| { type: "error"; message: string };
+
+// err.message on an APIError is the status plus the whole raw JSON body. The
+// human-readable sentence lives in the parsed payload; dig it out.
+const apiErrorMessage = (err: unknown) => {
+	if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
+	const body = err.error as { error?: { message?: string } } | undefined;
+	return `${err.status}: ${body?.error?.message ?? err.message}`;
+};
 
 const encoder = new TextEncoder();
 
@@ -46,7 +55,9 @@ export async function POST(req: Request) {
 	const stream = client.messages.stream({
 		model: MODEL,
 		max_tokens: 4096,
-		temperature: 0.4,
+		// temperature: 0.7,
+		// no temperature/top_p/top_k: the Claude 5 family rejects sampling params
+		// with a 400. Response shape is steered through the system prompt instead.
 		// Auto: system helps the model understand the context of the conversation and save tokens by caching the prefix
 		// Explicit: suitable for when you want to control the prefix yourself, but you will pay for the entire prompt every time
 		// COMMENT: Can use both :)
@@ -58,16 +69,10 @@ export async function POST(req: Request) {
 
 	const body = new ReadableStream<Uint8Array>({
 		async start(controller) {
-			const allEvents: any[] = [];
 			try {
 				for await (const event of stream) {
-					allEvents.push(event);
 					//type of event: message_start, content_block_start, content_block_delta X n, content_block_stop, message_delta, message_stop
 					if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-						console.log("frame from back:", JSON.stringify({
-							type: "text",
-							text: event.delta.text
-						})); 
 						controller.enqueue(
 							frame({ 
 								type: "text", 
@@ -100,7 +105,15 @@ export async function POST(req: Request) {
 
 				controller.close();
 			} catch (err) {
-				controller.error(err);
+				// frame and close cleanly instead.
+				console.error("chat stream failed:", err);
+				controller.enqueue(
+					frame({
+						type: "error",
+						message: apiErrorMessage(err)
+					})
+				);
+				controller.close();
 			}
 		},
 

@@ -68,6 +68,7 @@ export default function Home() {
   const { messages, reply, error, streaming, send, stop } = useChat();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   //* does the user still want to follow along and no need for re-rendering!
   const stickToBottom = useRef(true);
@@ -79,6 +80,15 @@ export default function Home() {
     // > 0 means the user has scrolled up, so we don't scroll down automatically.
     if (stickToBottom.current) bottomRef.current?.scrollIntoView();
   }, [reply, messages]);
+
+  // scrollHeight never reports less than the current height, so the box could
+  // only ever grow without the reset-to-auto first. The pair is load-bearing.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
 
   const submit = () => {
     send(input);
@@ -99,6 +109,16 @@ export default function Home() {
     stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
     // console.log("scrollTop:", scrollTop, "scrollHeight:", scrollHeight, "clientHeight:", clientHeight, scrollHeight - scrollTop - clientHeight, "stickToBottom:", stickToBottom.current);
   };
+
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    // Shift+Enter falls through to the textarea's own newline handling
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault(); 
+      submit();
+    }
+  }
 
   const isEmpty = messages.length === 0 && !streaming;
 
@@ -134,20 +154,23 @@ export default function Home() {
 
         </div>
 
+        {/* 3. auto-grow */}
+        {/* 4. disable on streaming */}
         <div className="flex flex-col gap-2 px-8 pb-8">
-          <input
-            className="w-full rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent) sm:text-sm"
+          <textarea
+            ref={textareaRef}
+            className="max-h-48 w-full resize-none overflow-y-auto rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent) sm:text-sm"
             value={input}
+            rows={1}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            onKeyDown={onKeyDown}
           />
 
           <div className="flex w-full justify-end">
             <button
-              className={`rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-                streaming
-                  ? "bg-(--muted)"
-                  : "bg-(--accent) hover:opacity-90"
+              disabled={!streaming && !input.trim()}
+              className={`rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${
+                streaming ? "bg-(--muted)" : "bg-(--accent) hover:opacity-90"
               }`}
               onClick={streaming ? stop : submit}
             >

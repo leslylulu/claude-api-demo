@@ -30,7 +30,6 @@ export function useChat() {
     abortRef.current = controller;
 
     const userMessage: ChatMessage = { role: "user", content: text };
-    // one local array, two consumers: the state update and the request body
     const history = [...messages, userMessage];
 
     setMessages(history);
@@ -80,6 +79,9 @@ export function useChat() {
               setReply(answer);
             } else if (frame.type === "usage") {
               usage = frame;
+            } else if (frame.type === "error") {
+              // arrives inside a 200 response — the status was spent on the first byte, so this is the only channel left
+              throw new Error(frame.message);
             }
           }
         }
@@ -91,7 +93,11 @@ export function useChat() {
       // from the shape of the error object
       if (!controller.signal.aborted) {
         console.error("Error sending message:", err);
-        setError("Something went wrong. Please try again.");
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : "Something went wrong. Please try again."
+        );
       }
     } finally {
       // the single commit point: an answer moves from the temp buffer into
