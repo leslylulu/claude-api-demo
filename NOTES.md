@@ -1308,8 +1308,8 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 ```
 
 The three prompt-token fields are disjoint and priced differently: cached ~0.1×,
-new 1.25× (write), fresh 1×. Caching also needs a 1024-token minimum prefix, so
-short chats show zeros.
+new 1.25× (write), fresh 1×. Short chats show zeros — the prefix hasn't reached
+the minimum cacheable length yet.
 
 **`memo` on `Message`**
 
@@ -1330,10 +1330,9 @@ useEffect(() => {
 }, [reply, messages]);
 ```
 
-Does the user still want to follow along? Reading it must not trigger a
-re-render, so it's a ref. Fixed while scrolling — but if the user scrolls up and
-then a new message arrives, we don't want to yank them back down, so we only
-scroll if they were already at the bottom.
+Reading it must not trigger a re-render, so it's a ref, not state. Only scroll
+if the user was already at the bottom — see
+[Auto-scroll has to yield to the user](#auto-scroll-has-to-yield-to-the-user).
 
 **`handleScroll` records, it doesn't scroll**
 
@@ -1346,9 +1345,8 @@ const handleScroll = () => {
 };
 ```
 
-`clientHeight` is the viewport height, `scrollHeight` the total content height,
-`scrollTop` how far we've scrolled from the top. Within 100px of the bottom
-counts as "sticking to the bottom".
+`clientHeight` is the viewport, `scrollHeight` the content, `scrollTop` the
+offset. Within 100px of the bottom counts as sticking.
 
 **Auto-grow needs the reset**
 
@@ -1361,8 +1359,8 @@ useEffect(() => {
 }, [input]);
 ```
 
-`scrollHeight` never reports less than the current height, so the box could only
-ever grow without the reset-to-`auto` first. The pair is load-bearing.
+`scrollHeight` never reports less than the current height, so without the
+reset-to-`auto` the box could only grow. The pair is load-bearing.
 
 **Enter vs. Shift+Enter vs. IME**
 
@@ -1376,8 +1374,9 @@ const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 }
 ```
 
-Shift+Enter falls through to the textarea's own newline handling. `isComposing`
-guards the IME preedit — that Enter belongs to the candidate picker, not to us.
+Shift+Enter falls through to the textarea's own newline handling; `isComposing`
+guards the IME preedit — see
+[Enter during an IME preedit isn't yours](#enter-during-an-ime-preedit-isnt-yours).
 
 **Layout notes**
 
@@ -1392,6 +1391,9 @@ so order stays chronological.
 
 ### `app/globals.css`
 
+Full reasoning for these lives in [UI / UX — what shipped](#ui--ux--what-shipped);
+this section is the code plus the one-line why.
+
 **Dark mode reassigns tokens, it doesn't swap them**
 
 ```css
@@ -1400,8 +1402,7 @@ so order stays chronological.
     --accent: #6c7cf0;
 ```
 
-Accent is NOT reused: `#0e21a0` on a dark ground is ~1.3:1. Lighten saturated
-colors, don't just swap.
+`#0e21a0` on a dark ground is ~1.3:1 — lighten saturated colors, don't reuse them.
 
 **Strip the plugin's literal backticks**
 
@@ -1412,8 +1413,7 @@ colors, don't just swap.
 }
 ```
 
-The plugin wraps inline code in literal backticks. `none` removes the box; `""`
-would keep an empty one in layout.
+`none` removes the box; `""` would keep an empty one in layout.
 
 **Compress the heading scale**
 
@@ -1429,11 +1429,9 @@ would keep an empty one in layout.
 .prose > :first-child { margin-top: 0; }
 ```
 
-`prose`'s editorial scale (h1 at 2.2em) shouts in a chat column — compress toward
-body size and let weight carry the hierarchy. The plugin also drops heading code
-to 0.875em while leaving weight alone: two fonts, two sizes, two weights in one
-line. Keep mono, inherit the rest. And the first child has nothing above it —
-that top margin is just a gap under the label.
+`prose`'s editorial scale (h1 at 2.2em) shouts in a chat column. Heading code
+inherits size and weight so one line isn't two fonts at two sizes. The first
+child has nothing above it.
 
 **Inline code as a chip; `pre code` resets it**
 
@@ -1452,9 +1450,8 @@ that top margin is just a gap under the label.
 }
 ```
 
-Padding is asymmetric so the chip hugs the glyphs instead of inflating
-line-height. A block is `<pre><code>`, so the chip styles land on it too — reset
-them.
+Asymmetric padding hugs the glyphs. A block is `<pre><code>`, so the chip styles
+land on it too — reset them.
 
 **Retheming via the plugin's own variables**
 
@@ -1466,8 +1463,7 @@ them.
 }
 ```
 
-These are the plugin's own custom properties — reassigning them is the supported
-retheme.
+Reassigning the plugin's own custom properties is the supported retheme.
 
 **The cursor is a pseudo-element**
 
@@ -1483,9 +1479,8 @@ retheme.
 }
 ```
 
-`::after`, not a sibling `<span>`: markdown emits block tags, and a block + an
-inline span can't share a line. `:empty` covers the gap before the first token.
-`steps()` gives a hard blink — the default easing reads as a breathing glow.
+Markdown emits block tags, and a block + an inline span can't share a line.
+`:empty` covers the gap before the first token; `steps()` gives a hard blink.
 
 **Scrollbar: invisible at rest**
 
@@ -1503,8 +1498,219 @@ inline span can't share a line. `:empty` covers the gap before the first token.
 }
 ```
 
-WebKit predates the standard properties above and ignores them in older Chrome
-and Safari. Same effect, vendor syntax.
+WebKit ignores the standard properties in older Chrome and Safari — same effect,
+vendor syntax.
+
+---
+
+## Tool errors and cancellation
+
+> `lib/tools.ts`, `app/api/chat/route.ts`, `hooks/useChat.ts`
+
+A tool that fails is not a turn that fails. The whole point of the error channel
+is that the model keeps talking.
+
+### Three ways to report a failure — only one of them works
+
+| Approach | What the model sees | What the user sees |
+| --- | --- | --- |
+| `throw`, let it reach the outer catch | Nothing — the turn is over | Stream cuts off, a red error |
+| Ordinary `tool_result` with `"error"` in the text | A normal result it has to interpret | The model may treat the error as data and invent an answer |
+| **`tool_result` with `is_error: true`** | **An explicit failure signal** | The model explains and offers a next step |
+
+`runTool` therefore never rejects — every call must produce a result:
+
+```ts
+export type ToolOutcome = { content: string; is_error?: boolean };
+
+export async function runTool(name: string, input: unknown): Promise<ToolOutcome> {
+	try {
+		switch (name) {
+			case "get_weather":
+				return ok(await getWeather(input));
+			case "get_stock_price":
+				return ok(await getStockPrice(input));
+			default:
+				return fail(`Unknown tool: ${name}`);
+		}
+	} catch (err) {
+		return fail(err instanceof Error ? err.message : String(err));
+	}
+}
+
+const ok = (data: unknown): ToolOutcome => ({ content: JSON.stringify(data) });
+
+const fail = (message: string): ToolOutcome => ({
+	content: JSON.stringify({ error: message }),
+	is_error: true,
+});
+```
+
+The `try` has to wrap the whole `switch`, not sit outside `Promise.all` in the
+route. `Promise.all` rejects on the first failure and discards the results that
+*did* succeed — with three parallel calls, one throw loses the other two.
+
+Error text is the model's only material for recovery, so name the alternatives:
+
+```ts
+throw new Error(`Unknown symbol: ${key}. Known symbols: ${Object.keys(PRICES).join(", ")}`);
+```
+
+Asked for `FAKECORP`, the model answered entirely out of that string — "不是一个
+有效的股票代码", then listed AAPL / NVDA / TSLA and offered to look one up. No
+invented price.
+
+### Every `tool_use` needs a `tool_result`, in the very next message
+
+Not a style rule — the API rejects the request. Replaying a history whose
+`tool_use` has no answer:
+
+```
+400: messages.2: `tool_use` ids were found without `tool_result` blocks
+immediately after: toolu_01ABC. Each `tool_use` block must have a
+corresponding `tool_result` block in the next message.
+```
+
+Two consequences, both load-bearing:
+
+1. **All results go in one user message.** Splitting them across several messages
+   is accepted, but it teaches the model that parallel calls get fragmented
+   replies — it quietly stops making them. No error, just a slow regression.
+2. **A cancelled round has to be closed out.** `turn` and `tool_result` are
+   separate frames, and the server runs the tools between them. Abort in that
+   window and the client has already committed an assistant message carrying a
+   `tool_use` that will never be answered — every later request 400s and the
+   conversation is unrecoverable without a reload.
+
+`finally` handles both stop cases, and they are mutually exclusive — the abort
+either landed in streaming text or inside a tool round:
+
+```ts
+} finally {
+  if (controller.signal.aborted) {
+    setMessages((prev) => {
+      // stopped mid-answer: commit what streamed in
+      if (answerText.trim()) {
+        return [...prev, {
+          role: "assistant",
+          content: [{ type: "text", text: answerText }],
+          stopped: true,
+        }];
+      }
+
+      // stopped between tool_use and tool_result: close the round out
+      const last = prev.at(-1);
+      if (last?.role !== "assistant" || !Array.isArray(last.content)) return prev;
+
+      const pending = last.content.filter((b) => b.type === "tool_use");
+      if (pending.length === 0) return prev;
+
+      return [...prev, {
+        role: "user",
+        content: pending.map((b) => ({
+          type: "tool_result" as const,
+          tool_use_id: b.id,
+          content: JSON.stringify({ error: "Cancelled by user" }),
+          is_error: true,
+        })),
+      }];
+    });
+  }
+  setReply([]);
+  setStreaming(false);
+  abortRef.current = null;
+}
+```
+
+Replayed, that history is accepted, and the cancellation reads as information
+rather than damage — the model answered the new question and added: "刚才查询
+AAPL 的请求被取消了，如果你还需要，可以告诉我，我再重新查一下。"
+
+### The error signal outlives its own turn
+
+`is_error` stays in the transcript. Asked the same dead ticker a second time, the
+model answered `end_turn` with **no tool call at all** — it had already learned
+the symbol doesn't exist. A `throw` leaves nothing behind to learn from.
+
+### A failed send must not stay in history
+
+A request that fails leaves its user message in `messages` with no assistant
+reply. Left alone it is re-sent on every subsequent turn — tokens paid forever,
+and the model eventually answers a pile of stale questions at once.
+
+`failed` is UI-only state, and the filter belongs where `history` is built,
+because that one array feeds both the display and the payload:
+
+```ts
+const userMessage: ChatMessage = { role: "user", content: text };
+const history = [...messages.filter((m) => !m.failed), userMessage];
+
+setMessages(history);                                    // what the UI shows
+body: JSON.stringify({ messages: toPayload(history) }),  // what gets sent
+```
+
+Marking is by object identity, not index — a failure can land after earlier
+`turn` and `tool_result` messages were already committed, so the user's message
+is not necessarily last:
+
+```ts
+setMessages((prev) => prev.map((m) => (m === userMessage ? { ...m, failed: true } : m)));
+```
+
+Retry then needs no state surgery of its own:
+
+```ts
+const retry = () => {
+  const failed = messages.findLast((m) => m.failed);
+  if (failed && typeof failed.content === "string") send(failed.content);
+};
+```
+
+The naive version — `setMessages(filter)` and then `send()` — silently fails:
+`send` reads `messages` from the render closure, which `setMessages` does not
+update. Verified on the wire: after an offline failure and a retry, the payload
+contained exactly one copy of the question and no trace of the failed message.
+
+In the UI, only the failed message gets the callback:
+
+```tsx
+<Message key={i} message={msg} onRetry={msg.failed ? retry : undefined} />
+```
+
+`retry` closes over `messages`, so it is a new function every render (`useCallback`
+can't fix that — the dependency changes). Passing it to every `Message` breaks
+`memo` for all of them and re-parses every message's markdown on each streamed
+token. `undefined` is referentially stable, so only the one failed message
+re-renders.
+
+### Thinking blocks ride along
+
+`claude-sonnet-5` runs adaptive thinking by default with `display: "omitted"`, so
+`turn` frames carry a thinking block with empty text and a signature:
+
+```json
+{"type":"thinking","thinking":"","signature":"EpADCpABCBEYAipAkwtAISXFRc6h..."}
+```
+
+It must be echoed back unchanged and stay first in the assistant content. Storing
+the whole `content` array does this for free. For readable reasoning, ask for it:
+`thinking: { type: "adaptive", display: "summarized" }`.
+
+### Caching, measured
+
+Cold turn on a fresh conversation: `1670 in (0 cached · 0 new · 1670 fresh)` —
+nothing cached, because the prefix hadn't reached the minimum cacheable length.
+Once the history grew:
+
+```json
+"input_tokens": 4,
+"cache_creation_input_tokens": 140,
+"cache_read_input_tokens": 2140
+```
+
+2140 tokens read from cache, 4 at full price. Caching works; short chats just
+don't reach the floor. Adding or editing a tool definition invalidates all of it
+— `tools` renders in front of `system`.
 
 ---
 
@@ -1512,21 +1718,22 @@ and Safari. Same effect, vendor syntax.
 
 ### Tool use
 
-- [ ] Render the `tool_use` frame in the UI — the call is invisible today, and
-      the gap between the preamble and the answer is a silent multi-second wait.
-- [ ] Commit frames so tool blocks survive into the next turn (above).
-- [ ] A second tool, to see how the model picks between them.
-- [ ] A tool that can fail — return the error as a `tool_result` and let the
-      model recover, rather than throwing and killing the stream.
+Done: `tool_use` / `tool_result` rendering, `turn` frames so tool blocks survive
+into the next turn, a second tool, a tool that fails via `is_error`, retry after
+a failed send, and cancellation of an in-flight tool round. See
+[Tool errors and cancellation](#tool-errors-and-cancellation).
+
+- [ ] Stream thinking (`display: "summarized"`) — the wait between the question
+      and the first `tool_use` is still a blank screen.
+- [ ] A tool that is slow rather than broken, to see the loop under latency.
 
 ### Caching
 
-- [ ] Verify caching still works after *any* change to prompt assembly. The
-      costly failure mode is silent: requests keep succeeding, the bill is
-      just higher. An assertion that a second identical request has
-      `cache_read_input_tokens > 0` is worth more than a one-time eyeball.
-      Tool definitions now sit in front of the prefix — one more thing that
-      invalidates everything when edited.
+- [x] Verify caching still works after a change to prompt assembly — measured
+      `cache_read_input_tokens: 2140` against 4 uncached. The failure mode is
+      silent (requests keep succeeding, the bill is just higher), so this needs
+      an assertion, not a one-time eyeball. Tool definitions sit in front of the
+      prefix — editing one invalidates everything.
 - [ ] Session total, not just per-message — sum usage across the chat.
 - [ ] `messages.countTokens()` to price a request *before* sending it.
 
