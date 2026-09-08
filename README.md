@@ -1,3 +1,13 @@
+# claude-api-demo
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/leslylulu/claude-api-demo/)
+
+A streaming chat app built directly on the Claude Messages API — NDJSON framing,
+tool use with error recovery, prompt caching, and per-turn token accounting.
+Build notes and the reasoning behind each decision live in [NOTES.md](./NOTES.md).
+
+Auto-generated docs for this repo: [deepwiki.com/leslylulu/claude-api-demo](https://deepwiki.com/leslylulu/claude-api-demo/)
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

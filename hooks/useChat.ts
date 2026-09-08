@@ -2,12 +2,11 @@ import { useRef, useState } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { UsageInfo } from "@/lib/pricing";
 
-// `stopped` is UI metadata, not part of the API payload — it has to be
-// stripped before the message is sent, or the API rejects the extra field.
-// `usage` is the same: what that turn cost, kept for display only.
+// UI-only fields, stripped before send
 export type ChatMessage = Anthropic.MessageParam & {
   stopped?: boolean;
   usage?: UsageInfo;
+  failed?: boolean
 };
 
 const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
@@ -15,7 +14,9 @@ const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [reply, setReply] = useState(""); // the answer still streaming in
+
+  const [reply, setReply] = useState<Anthropic.ContentBlockParam[]>([]); // the answer still streaming in
+
   const [error, setError] = useState("");
   const [streaming, setStreaming] = useState(false);
 
@@ -24,23 +25,21 @@ export function useChat() {
   const stop = () => abortRef.current?.abort();
 
   const send = async (text: string) => {
-    if (streaming || !text.trim()) return;
+    if (streaming || !text. trim()) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     const userMessage: ChatMessage = { role: "user", content: text };
-    const history = [...messages, userMessage];
+    // no failed msg 
+    const history = [...messages.filter((m) => !m.failed), userMessage];
 
     setMessages(history);
-    setReply("");
-    setError("");
     setStreaming(true);
+    setReply([]);
+    setError("");
 
-    // declared outside try so finally can read them
-    let answer = "";
-    let usage: UsageInfo | undefined;
-    let completed = false;
+    let answerText = ""; // only text streams delta by delta
 
     try {
       const response = await fetch("/api/chat", {
@@ -50,7 +49,7 @@ export function useChat() {
         signal: controller.signal,
       });
 
-      // the status locks once streaming starts, so check it here
+      // status locks once streaming starts
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
@@ -58,8 +57,7 @@ export function useChat() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
-      // NDJSON and with frame
-      let buffer = "";
+      let buffer = ""; // NDJSON
 
       if (reader) {
         while (true) {
@@ -70,27 +68,35 @@ export function useChat() {
 
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? ""; // the trailing partial line
+
           for (const line of lines) {
             if (!line) continue;
             const frame = JSON.parse(line);
-
             if (frame.type === "text") {
-              answer += frame.text;
-              setReply(answer);
+              answerText += frame.text; // one growing string
+              setReply([{ type: "text", text: answerText }]); // new array = new reference
+            } else if (frame.type === "turn") {
+              setMessages((prev) => [...prev, { role: "assistant", content: frame.content }]);
+              answerText = "";
+              setReply([]);
+            } else if (frame.type === "tool_result") {
+              setMessages((prev) => [...prev, { role: "user", content: frame.content }]);
             } else if (frame.type === "usage") {
-              usage = frame;
+              setMessages((prev) => 
+                prev.map((msg, index) => (index === prev.length - 1 ? 
+                  {...msg, usage: frame} : msg)
+                )
+              )
             } else if (frame.type === "error") {
-              // arrives inside a 200 response — the status was spent on the first byte, so this is the only channel left
+              // arrives inside a 200
               throw new Error(frame.message);
             }
           }
         }
       }
 
-      completed = true;
     } catch (err) {
-      // ask the controller whether this was a user stop, instead of guessing
-      // from the shape of the error object
+      // user stop, not a failure
       if (!controller.signal.aborted) {
         console.error("Error sending message:", err);
         setError(
@@ -98,29 +104,61 @@ export function useChat() {
             ? err.message
             : "Something went wrong. Please try again."
         );
+        // based on obj reference not index
+        setMessages((prev) => prev.map((m) => m === userMessage ? {...m, failed: true} : m))
       }
     } finally {
-      // the single commit point: an answer moves from the temp buffer into
-      // history when it finished, or when the user stopped it part-way
-      if ((completed || controller.signal.aborted) && answer.trim()) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: answer,
-            stopped: controller.signal.aborted,
-            // absent on an aborted turn — the usage frame is the last thing
-            // written, so stopping early means it never arrived
-            usage,
-          },
-        ]);
-      }
+      // stop: commit the partial answer
+      if (controller.signal.aborted) {
+        setMessages((prev) => {
+          if(answerText.trim()){
+            return [
+              ...prev,
+              {
+                role: "assistant",
+                content: [{type: "text", text: answerText}],
+                stopped: true
+              }
+            ]
+          }
+          
+          const last = prev.at(-1)
+          if(last?.role !== 'assistant' || !Array.isArray(last?.content)){
+            return prev;
+          }
 
-      setReply(""); // it lives in history now — leaving it here shows it twice
+          const pending = last.content.filter(b => b.type === 'tool_use')
+          if (pending.length === 0){
+            return prev
+          }
+
+          return [
+            ...prev,
+            {
+              role: "user",
+              content: pending.map((b) => ({
+                type: "tool_result" as const,
+                tool_use_id: b.id,
+                content: JSON.stringify({error: "Cancelled By User"}),
+                is_error: true,
+              })),
+            },
+          ]
+        });
+      }
+      setReply([]); // lives in history now
       setStreaming(false);
       abortRef.current = null;
     }
   };
 
-  return { messages, reply, error, streaming, send, stop };
+  const retry = () => {
+    const failed = messages.findLast((m) => m.failed)
+
+    if(failed && typeof failed.content === 'string'){
+      send(failed.content)
+    }
+  }
+
+  return { messages, reply, error, streaming, send, stop, retry };
 }
