@@ -963,6 +963,551 @@ array case — filling in a TODO, not a rewrite.
 
 ---
 
+## Comments, extracted
+
+Every explanatory comment that used to live in the source, kept with the code it
+was attached to. The files now carry keyword markers only — the reasoning is here.
+
+### `app/api/chat/route.ts`
+
+**`MAX_ROUNDS` — the loop needs a ceiling**
+
+```ts
+const MODEL = "claude-sonnet-5";
+const MAX_ROUNDS = 10; // tool rounds cap
+```
+
+Max turns of conversation before we give up and close the stream. A model that
+keeps asking for tools and never converges would otherwise loop forever on the
+server's money.
+
+**`SYSTEM_PROMPT` at module scope**
+
+```ts
+const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
+- Answer in the same language the user writes in.
+- Use markdown for structure: headings, lists, tables, code blocks.
+- Be concise. Prefer three short paragraphs over ten.
+- If you are unsure, say so instead of guessing.`;
+```
+
+Kept at module scope so the string stays byte-identical across requests — a
+stable prefix is what prompt caching needs. Never interpolate a date, a user id,
+or a feature flag in here: it sits at the front of the prefix, so one changed
+byte makes every cached turn behind it uncacheable.
+
+**`Frame` — our wire protocol, not the API's**
+
+```ts
+type Frame =
+	| { type: "text"; text: string }
+	| { type: "turn", content: Anthropic.ContentBlock[] }
+	| {
+			type: "usage";
+			model: string;
+			stop_reason: Anthropic.Message["stop_reason"];
+			usage: Anthropic.Usage;
+		}
+	| { type: "error"; message: string }
+	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] }
+```
+
+The API's own block enum is wider — `thinking`, `tool_use`, `tool_result`,
+`text`, `usage`, `image`, `citation`, plus event types like `start`, `error`,
+`metadata`. This union is only what *this app* puts on the wire.
+
+**`apiErrorMessage` — dig the sentence out**
+
+```ts
+const apiErrorMessage = (err: unknown) => {
+	if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
+	const body = err.error as { error?: { message?: string } } | undefined;
+	return `${err.status}: ${body?.error?.message ?? err.message}`;
+};
+```
+
+`err.message` on an `APIError` is the status plus the whole raw JSON body. The
+human-readable sentence lives in the parsed payload; dig it out.
+
+**`frame()` — NDJSON in two steps**
+
+```ts
+const encoder = new TextEncoder();
+const frame = (f: Frame) => encoder.encode(JSON.stringify(f) + "\n");
+```
+
+- obj → string + `\n` : `'{"type":"text","text":"hi"}\n'`
+- string → `Uint8Array`: `Uint8Array(31) [123, 34, 116, 121, 112, 101, ... , 10]`
+
+**`totals` — usage has to survive the loop**
+
+```ts
+const totals = {
+	input_tokens: 0,
+	output_tokens: 0,
+	cache_creation_input_tokens: 0,
+	cache_read_input_tokens: 0
+};
+```
+
+One turn can now cost several requests. `final.usage` covers only the last of
+them, so the numbers have to be carried across rounds.
+
+**Streaming the deltas**
+
+```ts
+const stream = client.messages.stream({ model: MODEL, /* ... */ messages: history });
+currentStream = stream;
+
+for await (const event of stream) {
+	if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+		controller.enqueue(frame({ type: "text", text: event.delta.text }));
+	}
+}
+
+const final = await stream.finalMessage();
+```
+
+Event order per request: `message_start`, `content_block_start`,
+`content_block_delta` × n, `content_block_stop`, `message_delta`,
+`message_stop`.
+
+If you want results earlier, `.on('contentBlock', (block) => {})` hands you each
+block as soon as it arrives — but the final message is only available after the
+stream is done.
+
+**`stop_reason` decides whether to loop**
+
+```ts
+if (final.stop_reason !== "tool_use") {
+	controller.enqueue(frame({
+		type: "usage",
+		model: final.model,
+		stop_reason: final.stop_reason,
+		usage: { ...final.usage, ...totals }
+	}));
+
+	controller.close();
+	return; // only successful exit
+}
+```
+
+The 7-value enum: `end_turn | max_tokens | stop_sequence | tool_use |
+pause_turn | refusal | model_context_window_exceeded`. Falling out of the loop
+instead of returning here means we ran out of rounds.
+
+**Running the tools**
+
+```ts
+const calls = final.content.filter(
+	(b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+);
+
+const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
+	calls.map(async (call) => ({
+		type: "tool_result" as const,
+		tool_use_id: call.id,
+		content: await runTool(call.name, call.input),
+	}))
+);
+```
+
+Round 1 fetches the tool results, pushes them into `history`, then round 2 gets
+the final answer.
+
+**Running out of rounds is an answer too**
+
+```ts
+controller.enqueue(frame({
+	type: "error",
+	message: `Stopped after ${MAX_ROUNDS} tool rounds without a final answer.`
+}));
+controller.close();
+```
+
+Falling out of the loop means the model kept asking for tools and never
+converged. Say so instead of leaving the stream hanging open.
+
+**`catch` frames, it doesn't throw**
+
+```ts
+} catch (err) {
+	console.error("chat stream failed:", err);
+	controller.enqueue(frame({ type: "error", message: apiErrorMessage(err) }));
+	controller.close();
+}
+```
+
+The status code was spent on the first byte, so an error after that can only
+travel as a frame. Frame it and close cleanly.
+
+**`cancel()`**
+
+```ts
+cancel() {
+	currentStream?.abort();
+}
+```
+
+Client aborted — stop paying for tokens nobody will read. `currentStream`, not
+`stream`: the loop may be on its third request by the time this fires.
+
+### `hooks/useChat.ts`
+
+**`ChatMessage` carries UI-only fields**
+
+```ts
+export type ChatMessage = Anthropic.MessageParam & {
+  stopped?: boolean;
+  usage?: UsageInfo;
+};
+
+const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
+  messages.map(({ role, content }) => ({ role, content }));
+```
+
+`stopped` is UI metadata, not part of the API payload — it has to be stripped
+before the message is sent, or the API rejects the extra field. `usage` is the
+same: what that turn cost, kept for display only.
+
+**One string, not a block array**
+
+```ts
+// declared outside try so finally can read it
+let answerText = "";
+```
+
+Only text streams in delta by delta; `tool_use` and `thinking` arrive whole
+inside a `turn` frame, so a single string is all the in-flight answer ever needs.
+
+**Check `response.ok` before reading**
+
+```ts
+if (!response.ok) {
+	throw new Error(`Request failed: ${response.status}`);
+}
+```
+
+The status locks once streaming starts, so check it here.
+
+**The NDJSON buffer**
+
+```ts
+const reader = response.body?.getReader();
+const decoder = new TextDecoder();
+let buffer = "";
+
+buffer += decoder.decode(value, { stream: true });
+const lines = buffer.split("\n");
+buffer = lines.pop() ?? ""; // the trailing partial line
+```
+
+A chunk boundary can land mid-JSON-object. `lines.pop()` holds the incomplete
+tail back until the next chunk completes it.
+
+**Accumulating text**
+
+```ts
+if (frame.type === "text") {
+  answerText += frame.text;
+  setReply([{ type: "text", text: answerText }]);
+}
+```
+
+Append to one growing string instead of pushing a block per delta: a long answer
+would otherwise become hundreds of blocks, and markdown spanning a chunk
+boundary (`**bo` + `ld**`) would be parsed in halves and never render.
+
+A fresh array every time — React re-renders on reference change, so mutating in
+place would leave the screen frozen.
+
+**The error frame arrives inside a 200**
+
+```ts
+} else if (frame.type === "error") {
+	throw new Error(frame.message);
+}
+```
+
+The status was spent on the first byte, so this is the only channel left.
+
+**Was it a stop or a failure?**
+
+```ts
+} catch (err) {
+	if (!controller.signal.aborted) {
+		console.error("Error sending message:", err);
+		setError(/* ... */);
+	}
+}
+```
+
+Ask the controller whether this was a user stop, instead of guessing from the
+shape of the error object.
+
+**`finally` commits a stopped answer**
+
+```ts
+} finally {
+	if (controller.signal.aborted && answerText.trim()) {
+		setMessages((prev) => [
+			...prev,
+			{ role: "assistant", content: [{ type: "text", text: answerText }], stopped: true },
+		]);
+	}
+	setReply([]);
+	setStreaming(false);
+	abortRef.current = null;
+}
+```
+
+A user stop leaves the partial answer only in `answerText` — no `turn` frame
+ever arrived to commit it — so write it into history here, or it vanishes when
+`setReply([])` clears the screen. And clearing `reply` is mandatory once the
+answer lives in history: leaving it would show the same text twice.
+
+### `app/page.tsx`
+
+**`ToolCall` — a rule, not a box**
+
+```tsx
+function ToolCall({ name, input }: { name: string; input: unknown }) {
+  // ...
+  return (
+    <div className="not-prose my-3 border-l-2 border-(--accent) pl-3 font-mono">
+```
+
+A tool call is metadata about how the answer was produced, not part of the
+answer. `not-prose` keeps the typography plugin off it.
+
+**`ToolResult` — `<details>`, zero JS**
+
+```tsx
+<details className="not-prose my-3 border-l-2 border-(--border) pl-3 font-mono">
+  <summary>result · {text.length} chars</summary>
+  <pre className="mt-1 max-h-64 overflow-auto ...">{body}</pre>
+</details>
+```
+
+Tool output is debugging detail, not conversation — 100 lines of JSON has no
+business shouting. `<details>` collapses it with zero JS and zero state.
+
+**`UsageLine` — three numbers, not one**
+
+```tsx
+function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
+  const s = summarize(usage);
+  return (
+    <div className="font-mono text-[11px] text-(--muted)">
+      {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
+      {s.uncached} fresh) → {s.outputTokens} out
+      {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
+    </div>
+  );
+}
+```
+
+The three prompt-token fields are disjoint and priced differently: cached ~0.1×,
+new 1.25× (write), fresh 1×. Caching also needs a 1024-token minimum prefix, so
+short chats show zeros.
+
+**`memo` on `Message`**
+
+```tsx
+const Message = memo(function Message({ message, streaming }: { ... }) {
+```
+
+Appending keeps past message objects referentially identical, so they skip
+re-render while a new answer streams. Markdown parsing is worth the compare.
+
+**`stickToBottom` is a ref, not state**
+
+```tsx
+const stickToBottom = useRef(true);
+
+useEffect(() => {
+	if (stickToBottom.current) bottomRef.current?.scrollIntoView();
+}, [reply, messages]);
+```
+
+Does the user still want to follow along? Reading it must not trigger a
+re-render, so it's a ref. Fixed while scrolling — but if the user scrolls up and
+then a new message arrives, we don't want to yank them back down, so we only
+scroll if they were already at the bottom.
+
+**`handleScroll` records, it doesn't scroll**
+
+```tsx
+const handleScroll = () => {
+	const el = scrollRef.current;
+	if (!el) return;
+	const { scrollTop, scrollHeight, clientHeight } = el;
+	stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
+};
+```
+
+`clientHeight` is the viewport height, `scrollHeight` the total content height,
+`scrollTop` how far we've scrolled from the top. Within 100px of the bottom
+counts as "sticking to the bottom".
+
+**Auto-grow needs the reset**
+
+```tsx
+useEffect(() => {
+	const el = textareaRef.current;
+	if (!el) return;
+	el.style.height = "auto";
+	el.style.height = `${el.scrollHeight}px`;
+}, [input]);
+```
+
+`scrollHeight` never reports less than the current height, so the box could only
+ever grow without the reset-to-`auto` first. The pair is load-bearing.
+
+**Enter vs. Shift+Enter vs. IME**
+
+```tsx
+const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+	if (e.nativeEvent.isComposing) return;
+	if (e.key === "Enter" && !e.shiftKey) {
+		e.preventDefault();
+		submit();
+	}
+}
+```
+
+Shift+Enter falls through to the textarea's own newline handling. `isComposing`
+guards the IME preedit — that Enter belongs to the candidate picker, not to us.
+
+**Layout notes**
+
+```tsx
+<main className="flex w-full h-dvh max-w-3xl flex-col bg-white">
+{/* ... */}
+{streaming && <Message streaming message={{role: "assistant", content: reply}} />}
+```
+
+`dvh` = dynamic viewport height. The in-flight answer renders *after* history,
+so order stays chronological.
+
+### `app/globals.css`
+
+**Dark mode reassigns tokens, it doesn't swap them**
+
+```css
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #6c7cf0;
+```
+
+Accent is NOT reused: `#0e21a0` on a dark ground is ~1.3:1. Lighten saturated
+colors, don't just swap.
+
+**Strip the plugin's literal backticks**
+
+```css
+.prose :not(.not-prose *) code::before,
+.prose :not(.not-prose *) code::after {
+  content: none;
+}
+```
+
+The plugin wraps inline code in literal backticks. `none` removes the box; `""`
+would keep an empty one in layout.
+
+**Compress the heading scale**
+
+```css
+.prose :is(h1, h2) { font-size: 1.25em; }
+.prose :is(h3, h4) { font-size: 1.05em; }
+
+.prose :is(h1, h2, h3, h4) code {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.prose > :first-child { margin-top: 0; }
+```
+
+`prose`'s editorial scale (h1 at 2.2em) shouts in a chat column — compress toward
+body size and let weight carry the hierarchy. The plugin also drops heading code
+to 0.875em while leaving weight alone: two fonts, two sizes, two weights in one
+line. Keep mono, inherit the rest. And the first child has nothing above it —
+that top margin is just a gap under the label.
+
+**Inline code as a chip; `pre code` resets it**
+
+```css
+.prose :not(.not-prose *) code {
+  background: var(--code-bg);
+  padding: 0.15em 0.35em;
+  /* ... */
+}
+
+.prose :not(.not-prose *) pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  /* ... */
+}
+```
+
+Padding is asymmetric so the chip hugs the glyphs instead of inflating
+line-height. A block is `<pre><code>`, so the chip styles land on it too — reset
+them.
+
+**Retheming via the plugin's own variables**
+
+```css
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-links: var(--accent);
+  /* ... */
+}
+```
+
+These are the plugin's own custom properties — reassigning them is the supported
+retheme.
+
+**The cursor is a pseudo-element**
+
+```css
+.streaming > :last-child::after,
+.streaming:empty::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;              /* em: grows inside a heading */
+  background: currentColor; /* follows dark mode */
+  animation: cursor-blink 1s steps(2, start) infinite;
+}
+```
+
+`::after`, not a sibling `<span>`: markdown emits block tags, and a block + an
+inline span can't share a line. `:empty` covers the gap before the first token.
+`steps()` gives a hard blink — the default easing reads as a breathing glow.
+
+**Scrollbar: invisible at rest**
+
+```css
+.scroll-slim {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent; /* thumb, track */
+}
+
+.scroll-slim::-webkit-scrollbar { width: 4px; }
+.scroll-slim::-webkit-scrollbar-thumb { background: transparent; }
+.scroll-slim:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+}
+```
+
+WebKit predates the standard properties above and ignores them in older Chrome
+and Safari. Same effect, vendor syntax.
+
+---
+
 ## TODO
 
 ### Tool use

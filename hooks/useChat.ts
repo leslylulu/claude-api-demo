@@ -2,9 +2,7 @@ import { useRef, useState } from "react";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { UsageInfo } from "@/lib/pricing";
 
-// `stopped` is UI metadata, not part of the API payload — it has to be
-// stripped before the message is sent, or the API rejects the extra field.
-// `usage` is the same: what that turn cost, kept for display only.
+// UI-only fields, stripped before send
 export type ChatMessage = Anthropic.MessageParam & {
   stopped?: boolean;
   usage?: UsageInfo;
@@ -39,10 +37,7 @@ export function useChat() {
     setError("");
     setStreaming(true);
 
-    // declared outside try so finally can read them
-    let answer: Anthropic.ContentBlockParam[] = [];
-    let usage: UsageInfo | undefined;
-    let completed = false;
+    let answerText = ""; // only text streams delta by delta
 
     try {
       const response = await fetch("/api/chat", {
@@ -52,7 +47,7 @@ export function useChat() {
         signal: controller.signal,
       });
 
-      // the status locks once streaming starts, so check it here
+      // status locks once streaming starts
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
@@ -60,8 +55,7 @@ export function useChat() {
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
-      // NDJSON and with frame
-      let buffer = "";
+      let buffer = ""; // NDJSON
 
       if (reader) {
         while (true) {
@@ -76,39 +70,31 @@ export function useChat() {
           for (const line of lines) {
             if (!line) continue;
             const frame = JSON.parse(line);
-            console.log("frame ===", frame  );
             if (frame.type === "text") {
-              // Merge into the trailing text block instead of pushing one per
-              // delta: a long answer would otherwise become hundreds of blocks,
-              // and markdown spanning a chunk boundary (`**bo` + `ld**`) would
-              // be parsed in halves and never render.
-              const last = answer.at(-1);
-              answer = last?.type === "text"
-                  ? [...answer.slice(0, -1), { ...last, text: last.text + frame.text }]
-                  : [...answer, { type: "text", text: frame.text }];
-              setReply(answer);
-            } else if (frame.type === "tool_use") {
-              // its own block — the next text delta starts a fresh one, which is
-              // what separates the preamble from the post-tool answer
-              answer = [
-                ...answer,
-                { type: "tool_use", id: frame.id, name: frame.name, input: frame.input }
-              ];
-              setReply(answer);
+              answerText += frame.text; // one growing string
+              setReply([{ type: "text", text: answerText }]); // new array = new reference
+            } else if (frame.type === "turn") {
+              setMessages((prev) => [...prev, { role: "assistant", content: frame.content }]);
+              answerText = "";
+              setReply([]);
+            } else if (frame.type === "tool_result") {
+              setMessages((prev) => [...prev, { role: "user", content: frame.content }]);
             } else if (frame.type === "usage") {
-              usage = frame;
+              setMessages((prev) => 
+                prev.map((msg, index) => (index === prev.length - 1 ? 
+                  {...msg, usage: frame} : msg)
+                )
+              )
             } else if (frame.type === "error") {
-              // arrives inside a 200 response — the status was spent on the first byte, so this is the only channel left
+              // arrives inside a 200
               throw new Error(frame.message);
             }
           }
         }
       }
 
-      completed = true;
     } catch (err) {
-      // ask the controller whether this was a user stop, instead of guessing
-      // from the shape of the error object
+      // user stop, not a failure
       if (!controller.signal.aborted) {
         console.error("Error sending message:", err);
         setError(
@@ -118,24 +104,18 @@ export function useChat() {
         );
       }
     } finally {
-      
-      // filter tool_use here!
-      const textOnly = answer.filter((b) => b.type === "text");
-
-      if ((completed || controller.signal.aborted) && textOnly.some((b) => b.text.trim())) {
+      // stop: commit the partial answer
+      if (controller.signal.aborted && answerText.trim()) {
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: textOnly,
-            stopped: controller.signal.aborted,
-            // absent on an aborted turn — the usage frame is the last thing
-            // written, so stopping early means it never arrived
-            usage,
+            content: [{ type: "text", text: answerText }],
+            stopped: true
           },
         ]);
       }
-      setReply([]); // it lives in history now — leaving it here shows it twice
+      setReply([]); // lives in history now
       setStreaming(false);
       abortRef.current = null;
     }

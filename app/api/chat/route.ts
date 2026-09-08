@@ -4,12 +4,9 @@ import Anthropic from "@anthropic-ai/sdk";
 const client = new Anthropic();
 
 const MODEL = "claude-sonnet-5";
-const MAX_ROUNDS = 10; // max turns of conversation before we give up and close the stream
+const MAX_ROUNDS = 10; // tool rounds cap
 
-// Kept at module scope so the string stays byte-identical across requests —
-// a stable prefix is what prompt caching needs. Never interpolate a date, a
-// user id, or a feature flag in here: it sits at the front of the prefix, so
-// one changed byte makes every cached turn behind it uncacheable.
+// prompt caching: module scope, byte-identical prefix
 const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
 - Answer in the same language the user writes in.
 - Use markdown for structure: headings, lists, tables, code blocks.
@@ -19,7 +16,7 @@ const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
 const TOOLS: Anthropic.Tool[] = [
 	{
 		name: "get_weather",
-		description: "Get the current weather for a given city. Use this whenever the user asks about the weather, temperature, or forecast. The city must be specified in the input. Show details in next 24 hours, including temperature, humidity, wind speed, and precipitation. Also provide a brief summary of the weather conditions.",
+		description: "Get the current weather for a given city. Use this whenever the user asks about the weather or temperature. The city must be specified in the input. Returns the current condition, temperature in Celsius, and humidity.",
 		input_schema: {
 			type: "object",
 			properties: {
@@ -30,10 +27,10 @@ const TOOLS: Anthropic.Tool[] = [
 	}
 ]
 
-// Enum: maybe "thinking", "tool_use", "tool_result", "text", "usage", "image", "citation"
-// "start", "error", "metadata" ...etc. are all possible, but we only care about text and usage here.
+// wire protocol — our frames, not the API's block enum
 type Frame =
 	| { type: "text"; text: string }
+	| { type: "turn", content: Anthropic.ContentBlock[] } 
 	| {
 			type: "usage";
 			model: string;
@@ -41,10 +38,9 @@ type Frame =
 			usage: Anthropic.Usage;
 		}
 	| { type: "error"; message: string }
-	| { type: "tool_use"; id: string; name: string; input: unknown }
+	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] }
 
-// err.message on an APIError is the status plus the whole raw JSON body. The
-// human-readable sentence lives in the parsed payload; dig it out.
+// APIError -> readable sentence
 const apiErrorMessage = (err: unknown) => {
 	if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
 	const body = err.error as { error?: { message?: string } } | undefined;
@@ -53,9 +49,7 @@ const apiErrorMessage = (err: unknown) => {
 
 const encoder = new TextEncoder();
 
-const frame = (f: Frame) => encoder.encode(JSON.stringify(f) + "\n");
-// obj -> string + \n : '{"type":"text","text":"hi"}\n'
-// string -> Uint8Array: Uint8Array(31) [123, 34, 116, 121, 112, 101, ... , 10]
+const frame = (f: Frame) => encoder.encode(JSON.stringify(f) + "\n"); // NDJSON
 
 export async function POST(req: Request) {
 	const { messages } = await req.json();
@@ -76,8 +70,7 @@ export async function POST(req: Request) {
 			try {
 				const history: Anthropic.MessageCreateParams["messages"] = [...messages];
 
-				// One turn can now cost several requests. final.usage covers only the
-				// last of them, so the numbers have to be carried across rounds.
+				// usage accumulates across rounds
 				const totals = {
 					input_tokens: 0,
 					output_tokens: 0,
@@ -96,14 +89,10 @@ export async function POST(req: Request) {
 						messages: history
 					});
 
-					// if want to know results earlier, can use `.on('contentBlock', (block) => {})` to get contentBlock as soon as it arrives, 
-					// but the final message is only available after the stream is done.
-
 					currentStream = stream;
 
+					// message_start -> content_block_delta x n -> message_stop
 					for await (const event of stream) {
-						//type of event: message_start, content_block_start, content_block_delta X n, content_block_stop, message_delta, message_stop
-						// console.log("chat stream event ===", event);	
 						if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
 							controller.enqueue(
 								frame({
@@ -115,25 +104,35 @@ export async function POST(req: Request) {
 
 
 					const final = await stream.finalMessage();
+					// console.log('fff ===', final)
+					const content: Anthropic.ContentBlock[] = final.stop_reason === "max_tokens" ? 
+						[
+							...final.content,
+							{
+								type: "text",
+								text: "\n\n[truncated: hit max_tokens]",
+								citations: []
+							}
+						]
+						: final.content;
+					
+
+					controller.enqueue(
+						frame({
+							type: "turn",
+							content
+						})
+					);
+
 
 					totals.input_tokens += final.usage.input_tokens;
 					totals.output_tokens += final.usage.output_tokens;
 					totals.cache_creation_input_tokens += final.usage.cache_creation_input_tokens ?? 0;
 					totals.cache_read_input_tokens += final.usage.cache_read_input_tokens ?? 0;
 
-					// 7 stop_reason enum: end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal | model_context_window_exceeded
-					// console.log("final ===", final);
-
+					// stop_reason enum: end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal | model_context_window_exceeded
 					if (final.stop_reason !== "tool_use") {
 
-						if (final.stop_reason === "max_tokens") {
-							controller.enqueue(
-								frame({
-									type: "text",
-									text: "\n\n[truncated: hit max_tokens]"
-								})
-							);
-						}
 						controller.enqueue(
 							frame({
 								type: "usage",
@@ -144,24 +143,15 @@ export async function POST(req: Request) {
 						);
 
 						controller.close();
-						return; // the only successful exit; falling out of the loop means we ran out of rounds
+						return; // only successful exit
 					} 
 
 
-					// here means use tool_use
-
+					// tool_use: round 1 fetches results, round 2 answers
 					const calls = final.content.filter(
 						(b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
 					);
 
-					// The next token is a whole round-trip away; without this the UI just
-					// freezes for the duration of the tool call.
-					for (const call of calls) {
-						controller.enqueue(
-							frame({ type: "tool_use", id: call.id, name: call.name, input: call.input })
-						);
-					}
-					//COMMENT round 1 to fetch tool results, then push to history, then round 2 to get final answer
 					const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
 						calls.map(async (call) => ({
 							type: "tool_result" as const,
@@ -170,7 +160,13 @@ export async function POST(req: Request) {
 						}))
 					);
 
-					// console.log("tool results ===", results);
+					
+					controller.enqueue(
+						frame({
+							type: "tool_result",
+							content: results
+						})
+					);
 
 					history.push({
 						role: "assistant",
@@ -180,10 +176,10 @@ export async function POST(req: Request) {
 						role: "user",
 						content: results
 					});
+					
 				} // end loop for MAX_ROUNDS
 
-				// Falling out of the loop means the model kept asking for tools and
-				// never converged. Say so instead of leaving the stream hanging open.
+				// ran out of rounds
 				controller.enqueue(
 					frame({
 						type: "error",
@@ -192,7 +188,7 @@ export async function POST(req: Request) {
 				);
 				controller.close();
 			} catch (err) {
-				// frame and close cleanly instead.
+				// error frame, not a throw
 				console.error("chat stream failed:", err);
 				controller.enqueue(
 					frame({
@@ -204,9 +200,8 @@ export async function POST(req: Request) {
 			}
 		},
 
-		// client aborted — stop paying for tokens nobody will read
+		// client aborted
 		cancel() {
-			// stream.abort();
 			currentStream?.abort();
 		}
 	});
