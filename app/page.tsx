@@ -14,7 +14,7 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
     return <Markdown remarkPlugins={remarkPlugins}>{content}</Markdown>;
   }
 
-  // TODO: render image / tool_result blocks too
+  // TODO: render image
   return content.map((block, i) => {
     if(block.type === "text") {
       return (
@@ -29,7 +29,7 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
     }
 
     if( block.type === "tool_result"){
-      return <ToolResult key={i} content={block.content} />;
+      return <ToolResult key={i} content={block.content} isError={block.is_error} />;
     }
 
     return null;
@@ -58,8 +58,10 @@ function ToolCall({ name, input }: { name: string; input: unknown }) {
 // tool output collapsed, zero JS
 function ToolResult({
   content,
+  isError
 }: {
   content: Anthropic.ToolResultBlockParam["content"];
+  isError?: boolean
 }) {
   const text =
     typeof content === "string"
@@ -72,9 +74,9 @@ function ToolResult({
   } catch {}
 
   return (
-    <details className="not-prose my-3 border-l-2 border-(--border) pl-3 font-mono">
-      <summary className="cursor-pointer text-[11px] text-(--muted) marker:text-(--muted)">
-        result · {text.length} chars
+    <details className={`not-prose my-3 border-l-2 pl-3 font-mono ${isError ? "border-red-500" : "border-(--border)"}`}>
+      <summary className="cursor-pointer text-[11px] text-(--muted)">
+        {isError ? "error" : "result"} · {text.length} chars
       </summary>
       <pre className="mt-1 max-h-64 overflow-auto text-[11px] leading-relaxed text-(--muted)">
         {body}
@@ -98,7 +100,15 @@ function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
 }
 
 // memo: skip re-render while streaming
-const Message = memo(function Message({ message, streaming }: { message: ChatMessage, streaming?: boolean }) {
+const Message = memo(function Message({ 
+  message, 
+  streaming,
+  onRetry
+}: { 
+  message: ChatMessage, 
+  streaming?: boolean,
+  onRetry?: () => void
+}) {
 
   const isToolResult = Array.isArray(message.content) &&
     message.content.length > 0 &&
@@ -107,7 +117,7 @@ const Message = memo(function Message({ message, streaming }: { message: ChatMes
   const isUserBubble = message.role === 'user' && !isToolResult;
   return (
     <div className={`flex flex-col gap-1 ${isUserBubble ? "items-end" : ""}`}>
-      <div className={`${isUserBubble ? "bg-(--bubble-user) max-w-[80%] px-4 py-2 rounded-2xl" : ""}`}>
+      <div className={`${isUserBubble ? "bg-(--bubble-user) max-w-[80%] px-4 py-2 rounded-2xl" : ""} ${message.failed ? "opacity-50" : ""}`}>
         <div className={`prose prose-sm max-w-none ${streaming ? "streaming" : ""}`}>
           {renderContent(message.content)}
         </div>
@@ -122,13 +132,23 @@ const Message = memo(function Message({ message, streaming }: { message: ChatMes
           <span className="h-px flex-1 bg-(--border)" />
         </div>
       )}
+
+      {message.failed && onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-xs text-red-500 underline underline-offset-2 hover:no-underline"
+        >
+          Failed to send · Retry
+        </button>
+      )}
     </div>
   );
 });
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const { messages, reply, error, streaming, send, stop } = useChat();
+  const { messages, reply, error, streaming, send, stop, retry } = useChat();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -192,7 +212,7 @@ export default function Home() {
           )}
 
           {messages.map((msg, i) => (
-            <Message key={i} message={msg} />
+            <Message key={i} message={msg} onRetry={ msg.failed ? retry : undefined} />
           ))}
 
           {/* in-flight answer, after history */}
@@ -219,7 +239,6 @@ export default function Home() {
 
           <div className="flex w-full justify-end">
             <button
-              disabled={!streaming && !input.trim()}
               className={`rounded-md px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${
                 streaming ? "bg-(--muted)" : "bg-(--accent) hover:opacity-90"
               }`}

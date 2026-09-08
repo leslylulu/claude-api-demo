@@ -11,7 +11,8 @@ const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
 - Answer in the same language the user writes in.
 - Use markdown for structure: headings, lists, tables, code blocks.
 - Be concise. Prefer three short paragraphs over ten.
-- If you are unsure, say so instead of guessing.`;
+- If you are unsure, say so instead of guessing.
+- When a tool fails, report only what the error message says. Do not add information from your own knowledge.`;
 
 const TOOLS: Anthropic.Tool[] = [
 	{
@@ -24,6 +25,19 @@ const TOOLS: Anthropic.Tool[] = [
 			},
 			required: ["city"],
 		}
+	},
+	{
+		name: "get_stock_price",
+		description: "Get the latest price for a stock ticker symbol. Use this when the user asks about a stock, share price, or ticker.",
+		input_schema: {
+			type: "object",
+			properties: {
+				symbol: {
+					type: "string", description: "The ticker symbol, e.g. AAPL"
+				},
+			},
+			required: ["symbol"],
+		}
 	}
 ]
 
@@ -31,14 +45,15 @@ const TOOLS: Anthropic.Tool[] = [
 type Frame =
 	| { type: "text"; text: string }
 	| { type: "turn", content: Anthropic.ContentBlock[] } 
-	| {
-			type: "usage";
-			model: string;
-			stop_reason: Anthropic.Message["stop_reason"];
-			usage: Anthropic.Usage;
-		}
-	| { type: "error"; message: string }
 	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] }
+	| {
+		type: "usage";
+		model: string;
+		stop_reason: Anthropic.Message["stop_reason"];
+		usage: Anthropic.Usage;
+	}
+	| { type: "error"; message: string }
+
 
 // APIError -> readable sentence
 const apiErrorMessage = (err: unknown) => {
@@ -153,11 +168,15 @@ export async function POST(req: Request) {
 					);
 
 					const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
-						calls.map(async (call) => ({
-							type: "tool_result" as const,
-							tool_use_id: call.id,
-							content: await runTool(call.name, call.input),
-						}))
+						calls.map(async (call) => {
+							const outcome = await runTool(call.name, call.input);
+							return {
+								type: "tool_result" as const,
+								tool_use_id: call.id,
+								content: outcome.content,
+								...(outcome.is_error && { is_error: true})
+							}
+						})
 					);
 
 					

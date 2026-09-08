@@ -6,6 +6,7 @@ import type { UsageInfo } from "@/lib/pricing";
 export type ChatMessage = Anthropic.MessageParam & {
   stopped?: boolean;
   usage?: UsageInfo;
+  failed?: boolean
 };
 
 const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
@@ -30,12 +31,13 @@ export function useChat() {
     abortRef.current = controller;
 
     const userMessage: ChatMessage = { role: "user", content: text };
-    const history = [...messages, userMessage];
+    // no failed msg 
+    const history = [...messages.filter((m) => !m.failed), userMessage];
 
     setMessages(history);
+    setStreaming(true);
     setReply([]);
     setError("");
-    setStreaming(true);
 
     let answerText = ""; // only text streams delta by delta
 
@@ -102,18 +104,47 @@ export function useChat() {
             ? err.message
             : "Something went wrong. Please try again."
         );
+        // based on obj reference not index
+        setMessages((prev) => prev.map((m) => m === userMessage ? {...m, failed: true} : m))
       }
     } finally {
       // stop: commit the partial answer
-      if (controller.signal.aborted && answerText.trim()) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: [{ type: "text", text: answerText }],
-            stopped: true
-          },
-        ]);
+      if (controller.signal.aborted) {
+        setMessages((prev) => {
+          if(answerText.trim()){
+            return [
+              ...prev,
+              {
+                role: "assistant",
+                content: [{type: "text", text: answerText}],
+                stopped: true
+              }
+            ]
+          }
+          
+          const last = prev.at(-1)
+          if(last?.role !== 'assistant' || !Array.isArray(last?.content)){
+            return prev;
+          }
+
+          const pending = last.content.filter(b => b.type === 'tool_use')
+          if (pending.length === 0){
+            return prev
+          }
+
+          return [
+            ...prev,
+            {
+              role: "user",
+              content: pending.map((b) => ({
+                type: "tool_result" as const,
+                tool_use_id: b.id,
+                content: JSON.stringify({error: "Cancelled By User"}),
+                is_error: true,
+              })),
+            },
+          ]
+        });
       }
       setReply([]); // lives in history now
       setStreaming(false);
@@ -121,5 +152,13 @@ export function useChat() {
     }
   };
 
-  return { messages, reply, error, streaming, send, stop };
+  const retry = () => {
+    const failed = messages.findLast((m) => m.failed)
+
+    if(failed && typeof failed.content === 'string'){
+      send(failed.content)
+    }
+  }
+
+  return { messages, reply, error, streaming, send, stop, retry };
 }
