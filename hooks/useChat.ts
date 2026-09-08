@@ -15,7 +15,9 @@ const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
 
 export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [reply, setReply] = useState(""); // the answer still streaming in
+
+  const [reply, setReply] = useState<Anthropic.ContentBlockParam[]>([]); // the answer still streaming in
+
   const [error, setError] = useState("");
   const [streaming, setStreaming] = useState(false);
 
@@ -24,7 +26,7 @@ export function useChat() {
   const stop = () => abortRef.current?.abort();
 
   const send = async (text: string) => {
-    if (streaming || !text.trim()) return;
+    if (streaming || !text. trim()) return;
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -33,12 +35,12 @@ export function useChat() {
     const history = [...messages, userMessage];
 
     setMessages(history);
-    setReply("");
+    setReply([]);
     setError("");
     setStreaming(true);
 
     // declared outside try so finally can read them
-    let answer = "";
+    let answer: Anthropic.ContentBlockParam[] = [];
     let usage: UsageInfo | undefined;
     let completed = false;
 
@@ -70,12 +72,28 @@ export function useChat() {
 
           const lines = buffer.split("\n");
           buffer = lines.pop() ?? ""; // the trailing partial line
+
           for (const line of lines) {
             if (!line) continue;
             const frame = JSON.parse(line);
-
+            console.log("frame ===", frame  );
             if (frame.type === "text") {
-              answer += frame.text;
+              // Merge into the trailing text block instead of pushing one per
+              // delta: a long answer would otherwise become hundreds of blocks,
+              // and markdown spanning a chunk boundary (`**bo` + `ld**`) would
+              // be parsed in halves and never render.
+              const last = answer.at(-1);
+              answer = last?.type === "text"
+                  ? [...answer.slice(0, -1), { ...last, text: last.text + frame.text }]
+                  : [...answer, { type: "text", text: frame.text }];
+              setReply(answer);
+            } else if (frame.type === "tool_use") {
+              // its own block — the next text delta starts a fresh one, which is
+              // what separates the preamble from the post-tool answer
+              answer = [
+                ...answer,
+                { type: "tool_use", id: frame.id, name: frame.name, input: frame.input }
+              ];
               setReply(answer);
             } else if (frame.type === "usage") {
               usage = frame;
@@ -100,14 +118,16 @@ export function useChat() {
         );
       }
     } finally {
-      // the single commit point: an answer moves from the temp buffer into
-      // history when it finished, or when the user stopped it part-way
-      if ((completed || controller.signal.aborted) && answer.trim()) {
+      
+      // filter tool_use here!
+      const textOnly = answer.filter((b) => b.type === "text");
+
+      if ((completed || controller.signal.aborted) && textOnly.some((b) => b.text.trim())) {
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: answer,
+            content: textOnly,
             stopped: controller.signal.aborted,
             // absent on an aborted turn — the usage frame is the last thing
             // written, so stopping early means it never arrived
@@ -115,8 +135,7 @@ export function useChat() {
           },
         ]);
       }
-
-      setReply(""); // it lives in history now — leaving it here shows it twice
+      setReply([]); // it lives in history now — leaving it here shows it twice
       setStreaming(false);
       abortRef.current = null;
     }

@@ -41,7 +41,7 @@ type Frame =
 			usage: Anthropic.Usage;
 		}
 	| { type: "error"; message: string }
-	| { type: "tool_use"; name: string; input: unknown }
+	| { type: "tool_use"; id: string; name: string; input: unknown }
 
 // err.message on an APIError is the status plus the whole raw JSON body. The
 // human-readable sentence lives in the parsed payload; dig it out.
@@ -158,7 +158,7 @@ export async function POST(req: Request) {
 					// freezes for the duration of the tool call.
 					for (const call of calls) {
 						controller.enqueue(
-							frame({ type: "tool_use", name: call.name, input: call.input })
+							frame({ type: "tool_use", id: call.id, name: call.name, input: call.input })
 						);
 					}
 					//COMMENT round 1 to fetch tool results, then push to history, then round 2 to get final answer

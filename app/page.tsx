@@ -14,14 +14,42 @@ function renderContent(content: Anthropic.MessageParam["content"]) {
     return <Markdown remarkPlugins={remarkPlugins}>{content}</Markdown>;
   }
 
-  // TODO: render image / tool_use blocks too
-  return content.map((block, i) => (
-    <div key={i}>
-      {block.type === "text" ? (
-        <Markdown remarkPlugins={remarkPlugins}>{block.text}</Markdown>
-      ) : null}
+  // TODO: render image / tool_result blocks too
+  return content.map((block, i) => {
+    if(block.type === "text") {
+      return (
+        <div key={i}>
+          <Markdown remarkPlugins={remarkPlugins}>{block.text}</Markdown>
+        </div>
+      );
+    }
+
+    if (block.type === "tool_use") {
+      return <ToolCall key={i} name={block.name} input={block.input} />;
+    }
+
+    return null;
+  });
+}
+
+// A tool call is metadata about how the answer was produced, not part of the
+// answer — a rule, not a box. not-prose keeps the typography plugin off it.
+function ToolCall({ name, input }: { name: string; input: unknown }) {
+  const args =
+    input && typeof input === "object"
+      ? Object.entries(input as Record<string, unknown>)
+      : [];
+
+  return (
+    <div className="not-prose my-3 border-l-2 border-(--accent) pl-3 font-mono">
+      <div className="text-xs text-(--foreground)">{name}</div>
+      {args.map(([key, value]) => (
+        <div key={key} className="text-[11px] text-(--muted)">
+          {key}: {typeof value === "string" ? value : JSON.stringify(value)}
+        </div>
+      ))}
     </div>
-  ));
+  );
 }
 
 // The three prompt-token fields are disjoint and priced differently:
@@ -121,6 +149,8 @@ export default function Home() {
   }
 
   const isEmpty = messages.length === 0 && !streaming;
+
+  // console.log("messages ===", messages);
 
   return (
     <div className="flex flex-1 flex-col items-center bg-gray-50 font-sans">
