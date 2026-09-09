@@ -1,5 +1,6 @@
 import { runTool } from "@/lib/tools";
 import Anthropic from "@anthropic-ai/sdk";
+import { allow, clientIp } from "@/lib/rate-limit";
 
 const client = new Anthropic();
 
@@ -66,7 +67,23 @@ const encoder = new TextEncoder();
 
 const frame = (f: Frame) => encoder.encode(JSON.stringify(f) + "\n"); // NDJSON
 
+// A chat turn can run several requests and resends the whole history each time,
+// so it costs more than a check-in and gets a tighter budget per hour.
+const LIMIT = 30;
+const WINDOW_MS = 60 * 60 * 1000;
+
+// Streaming plus up to MAX_ROUNDS tool rounds is the longest thing this app
+// does, and past the ceiling the stream is cut mid-answer — a bug that never
+// reproduces locally. Ten rounds of stream-plus-tool can run well over a
+// minute, so this stays at the platform default rather than below it. Lower it
+// only together with MAX_ROUNDS.
+export const maxDuration = 300;
+
 export async function POST(req: Request) {
+	if (!allow(clientIp(req), LIMIT, WINDOW_MS)) {
+		return new Response("Too many messages. Try again later.", { status: 429 });
+	}
+
 	const { messages } = await req.json();
 
 	if (!Array.isArray(messages) || messages.length === 0) {
