@@ -313,17 +313,23 @@ function Card({
 }) {
   if (c.needs_human) {
     return (
-      <section className="flex flex-col gap-3 rounded-xl border border-red-500/40 p-5">
+      /* No red border: a card that looks like an error makes the person feel
+         flagged, and this branch is the opposite of alarm. */
+      <section className="flex flex-col gap-3 rounded-xl border border-(--border) p-5">
         <Note>{note}</Note>
         {c.separation && <p className="text-foreground">{c.separation}</p>}
         <p className="text-foreground">
-          What you’re describing is beyond what I can help with, and it deserves
-          to be taken more seriously than I can take it. Talking to a real person
-          would matter more than anything I can say here.
+          What you’re describing is past what I can help with.
         </p>
-        {/* TODO — BLOCKS DEPLOY: put verified, region-appropriate crisis
-            resources here. A wrong or dead number is worse than none, so this
-            must be checked by hand, not generated. */}
+        <p className="text-foreground">
+          Talk to someone real — a friend you trust, a group that meets in
+          person, or a professional. Not because something is wrong with you.
+          Some things need a person, not an app.
+        </p>
+        {/* TODO: region-appropriate crisis lines would be better than this, but
+            a wrong or dead number is worse than none — check any by hand rather
+            than generating them. Not a blocker: pointing at real people already
+            does the one thing that matters, which is to stop encouraging. */}
       </section>
     );
   }
