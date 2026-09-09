@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { CheckinSchema } from "@/lib/checkin";
+import { allow, clientIp } from "@/lib/rate-limit";
 import { QUOTE_CATALOG } from "@/lib/quotes";
 
 const client = new Anthropic();
@@ -92,7 +93,19 @@ Format: id [feelings] text
 
 ${QUOTE_CATALOG}`;
 
+const LIMIT = 20;
+const WINDOW_MS = 60 * 60 * 1000;
+
+// Vercel's default is already 300s, so this lowers the ceiling rather than
+// raising it. The route runs ~7s; 60 leaves room for a slow upstream without
+// letting a stuck request sit on a slot for five minutes.
+export const maxDuration = 60;
+
 export async function POST(req: Request) {
+	if (!allow(clientIp(req), LIMIT, WINDOW_MS)) {
+		return new Response("Too many check-ins. Try again later.", { status: 429 });
+	}
+
 	const { note, goal, why } = await req.json();
 
 	if (typeof note !== "string" || !note.trim()) {
