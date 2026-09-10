@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { CheckinSchema } from "@/lib/checkin";
+import { Checkin, CheckinSchema } from "@/lib/checkin";
 import { allow, clientIp } from "@/lib/rate-limit";
 import { QUOTE_CATALOG } from "@/lib/quotes";
 
@@ -82,6 +82,24 @@ line is never null except when needs_human is true. It is the card;
 separation and capability are things that may or may not have anything to say, 
 but there is always a line worth writing.
 
+You may be shown earlier check-ins. They are there so you do not repeat
+yourself: do not reuse a line you already gave them, and do not name a
+capability you have already named. Days that connect are worth saying out loud —
+"the third evening in a row you sat down" is something only the history can see.
+Never use the history to track whether they are keeping up.
+
+The no-repeat rule covers separation too, and it covers sentence shape, not
+just wording. "X is a speed, not a verdict on you" is one shape; using it again
+with different nouns is still repeating yourself. If the same frame is the only
+thing that fits, say the plainer version instead.
+
+heard is the only field allowed to run more than a sentence, and it earns that
+length only by covering what they actually raised. Length has to track theirs:
+a long note answered in one line reads as being brushed off, and a short note
+answered in four sentences reads as filler. Everything the rest of the prompt
+forbids still applies here — no reassuring tail, no verdict they did not pass,
+no reading of their progress.
+
 SAFETY
 Set needs_human true only for sustained hopelessness, self-harm, or something
 beyond a hard day. When it is true, separation is one plain sentence that
@@ -108,6 +126,8 @@ line.based_on.
 - A line shown with an attribution (— Someone, Somewhere) must be reproduced
   word for word and never adapted.
 - If nothing in the catalog fits this moment, set line to null.
+
+
 
 Format: id [feelings] text
 
@@ -139,19 +159,48 @@ export async function POST(req: Request) {
 	}
 
 	
-	const { note, goal, why } = await req.json();
+	const { note, goal_id } = await req.json();
 
 	if (typeof note !== "string" || !note.trim()) {
 		return new Response("note is required", { status: 400 });
 	}
-	if (typeof goal !== "string" || !goal.trim()) {
-		return new Response("goal is required", { status: 400 });
+	if (typeof goal_id !== "string" ) {
+		return new Response("goal_id is required", { status: 400 });
 	}
 
+	const { data: goal } = await supabase
+		.from("goals")
+		.select("text, why")
+		.eq("id", goal_id)
+		.single()
+
+	if(!goal){
+		return new Response("goal not found", { status: 404 })
+	}
+
+	const { data: recent } = await supabase
+		.from('checkins')
+		.select("at, note, result")
+		.eq("goal_id", goal_id)
+		.order("at", { ascending: false})
+		.limit(10)
+
+	const history = (recent ?? []).reverse();
+
+	const past = history.map((item) => {
+		const day = new Date(item.at).toISOString().slice(0, 10);
+		const said = (item.result as Checkin).line?.text ?? "";
+		const noticed = (item.result as Checkin).capability ?? ""
+		return `[${day}] They wrote: ${item.note}\n You said: ${said}${noticed ? `\n You noticed: ${noticed}` : ""}`
+	})
+	.join("\n\n")
+
+
 	const content = [
-		`My goal: ${goal}`,
-		why?.trim() ? `Why is this what I want: ${why}` : null,
-		`Today: ${note}`,
+		`Their goal: ${goal.text}`,
+		goal.why ? `Why it matters to them: ${goal.why}` : null,
+		past ? `Earlier check-ins, oldest first:\n\n${past}` : null,
+		`Today they wrote:\n${note}`,
 	]
 		.filter(Boolean)
 		.join("\n\n");
@@ -160,8 +209,14 @@ export async function POST(req: Request) {
 		const response = await client.messages.parse({
 			model: MODEL,
 			max_tokens: 2048, 
-			system: SYSTEM_PROMPT,
-			cache_control: {type: "ephemeral"},
+			system: [
+				{
+					type: "text",
+					text: SYSTEM_PROMPT,
+					cache_control: { type: "ephemeral"}
+				}
+			],
+			// cache_control: {type: "ephemeral"},
 			messages: [{ role: "user", content }], // goal: xx, why: xxx, today: xxx
 			output_config: { 
 				effort: "medium", 
@@ -169,7 +224,7 @@ export async function POST(req: Request) {
 			},
 		});
 
-
+		// console.log('usage === ', response.usage);
 		if (!response.parsed_output) {
 			return new Response("Could not parse the response", { status: 502 });
 		}

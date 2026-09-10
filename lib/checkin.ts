@@ -49,6 +49,18 @@ export const CheckinSchema = z.object({
 			Null when this note contains nothing they did: a note that is only a feeling,"a question, or a few words of agreement has no action in it to name.
 		`),
 
+	heard: z
+		.string()
+		.nullable()
+		.describe(
+			`Two to four sentences, only when the note carries more than one thing — a long note, several worries, or an argument they are making. 
+			Take up each thing they actually raised; 
+			a note with three worries answered on one of them reads as being brushed off. 
+			Do not repeat their words back to them: name what sits under what they said, the part they did not put into words.
+			Never console, never advise, never comment on whether they are keeping up.
+      Null when the note is short or says one thing — then the line alone is enough.
+			`),
+			
 	ask_for_reason: z
 		.string()
 		.nullable()

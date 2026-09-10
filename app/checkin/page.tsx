@@ -296,7 +296,10 @@ function Thread({ goal }: { goal: Goal }) {
       const res = await fetch("/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note, goal: goal.text, why: goal.why }),
+        body: JSON.stringify({ 
+          note, 
+          goal_id: goal.id 
+        }),
       });
       if(res.status === 401){
         router.push("/login")
@@ -458,6 +461,7 @@ function Card({
       <Note>{note}</Note>
       {(c.separation || c.line || c.capability) && (
         <div className="bg-purple-800/10 p-4 rounded-lg flex flex-col gap-4 ">
+          {c.heard && <p className="text-sm text-(--muted)">{c.heard}</p>}
           {c.separation && <p className="text-gray-600 text-sm">{c.separation}</p>}
 
           {c.line && (
