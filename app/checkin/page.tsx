@@ -4,18 +4,28 @@ import type { Checkin } from "@/lib/checkin";
 import { quoteById } from "@/lib/quotes";
 import { addGoal, deleteGoal, getGoals, updateGoal, type Goal } from "@/lib/goal";
 import { addEntry, getHistory, type Entry } from "@/lib/history";
+import { useRouter } from 'next/navigation';
+import { createClient } from "@/lib/supabase/client"
 
 export default function CheckinPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [email, setEmail] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   // The goals live in Postgres now, so the first paint has nothing to show yet.
   // Deliberately empty rather than briefly wrong.
   const [loaded, setLoaded] = useState(false);
-
+  
   useEffect(() => {
     let cancelled = false;
+
+    createClient().auth.getUser().then(({data}) => {
+      if(!cancelled){
+        setEmail(data.user?.email ?? null)
+      }
+    })
+      
     getGoals().then((gs) => {
       if (cancelled) return;
       setGoals(gs);
@@ -72,6 +82,7 @@ export default function CheckinPage() {
     <main className="mx-auto flex h-dvh w-full max-w-2xl flex-col">
       <Tabs
         goals={goals}
+        name={ email?.split('@')[0] ?? null }
         activeId={active.id}
         onSelect={setActiveId}
         onAdd={() => setAdding(true)}
@@ -191,12 +202,14 @@ function GoalSetup({
 // why no card in the thread below repeats either of them.
 function Tabs({
   goals,
+  name,
   activeId,
   onSelect,
   onAdd,
   onEdit,
 }: {
   goals: Goal[];
+  name: string | null;
   activeId: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
@@ -234,12 +247,20 @@ function Tabs({
         <button onClick={onEdit} className="shrink-0 text-xs text-(--muted) hover:text-foreground">
           Edit
         </button>
+        {name && <span className="shrink-0 text-xs text-(--muted)">{name}</span>}
+        <form action="/auth/signout" method="post" className="shrink-0">
+          <button type="submit" className="text-xs text-(--muted) hover:text-foreground">
+            Sign out
+          </button>
+
+        </form>
       </div>
     </header>
   );
 }
 
 function Thread({ goal }: { goal: Goal }) {
+  const router = useRouter()
   const [entries, setEntries] = useState<Entry[]>([]);
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
@@ -277,6 +298,10 @@ function Thread({ goal }: { goal: Goal }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note, goal: goal.text, why: goal.why }),
       });
+      if(res.status === 401){
+        router.push("/login")
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
 
       const result: Checkin = await res.json();
