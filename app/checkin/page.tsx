@@ -252,7 +252,7 @@ function Thread({ goal }: { goal: Goal }) {
           className="w-full resize-none rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent)"
         />
         <div className="flex items-center justify-end gap-3">
-          <span className="text-xs text-(--muted)">Enter to send · Shift+Enter for a new line</span>
+          <span className="text-xs text-(--muted)">Claude is AI and can make mistakes. Please double-check responses.</span>
           <button
             onClick={submit}
             disabled={pending || !note.trim()}
