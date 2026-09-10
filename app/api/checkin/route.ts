@@ -1,3 +1,5 @@
+import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { CheckinSchema } from "@/lib/checkin";
@@ -102,10 +104,23 @@ const WINDOW_MS = 60 * 60 * 1000;
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-	if (!allow(clientIp(req), LIMIT, WINDOW_MS)) {
+	if (!allow(`ip:${clientIp(req)}`, LIMIT * 3, WINDOW_MS)) {
 		return new Response("Too many check-ins. Try again later.", { status: 429 });
 	}
 
+	const supabase = createClient(await cookies());
+
+	const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+	if (authError || !user) {
+		return new Response("Sign in First", { status: 401 })
+	}
+
+	if (!allow(`user:${user.id}`, LIMIT, WINDOW_MS)) {
+		return new Response("Too many check-ins. Try again later.", { status: 429 });
+	}
+
+	
 	const { note, goal, why } = await req.json();
 
 	if (typeof note !== "string" || !note.trim()) {

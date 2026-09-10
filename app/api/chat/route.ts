@@ -80,7 +80,7 @@ const WINDOW_MS = 60 * 60 * 1000;
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
-	if (!allow(clientIp(req), LIMIT, WINDOW_MS)) {
+	if (!allow(`chat:${clientIp(req)}`, LIMIT, WINDOW_MS)) {
 		return new Response("Too many messages. Try again later.", { status: 429 });
 	}
 

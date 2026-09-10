@@ -2,22 +2,39 @@
 import { useEffect, useRef, useState } from "react";
 import type { Checkin } from "@/lib/checkin";
 import { quoteById } from "@/lib/quotes";
-import { addGoal, getGoals, type Goal } from "@/lib/goal";
+import { addGoal, deleteGoal, getGoals, updateGoal, type Goal } from "@/lib/goal";
 import { addEntry, getHistory, type Entry } from "@/lib/history";
+import { useRouter } from 'next/navigation';
+import { createClient } from "@/lib/supabase/client"
 
 export default function CheckinPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [email, setEmail] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  // localStorage can't be read during render (the server has no window), so the
-  // first paint is deliberately empty rather than briefly wrong.
+  const [editing, setEditing] = useState(false);
+  // The goals live in Postgres now, so the first paint has nothing to show yet.
+  // Deliberately empty rather than briefly wrong.
   const [loaded, setLoaded] = useState(false);
-
+  
   useEffect(() => {
-    const gs = getGoals();
-    setGoals(gs);
-    setActiveId(gs[0]?.id ?? null);
-    setLoaded(true);
+    let cancelled = false;
+
+    createClient().auth.getUser().then(({data}) => {
+      if(!cancelled){
+        setEmail(data.user?.email ?? null)
+      }
+    })
+      
+    getGoals().then((gs) => {
+      if (cancelled) return;
+      setGoals(gs);
+      setActiveId(gs[0]?.id ?? null);
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const onCreated = (g: Goal) => {
@@ -26,16 +43,36 @@ export default function CheckinPage() {
     setAdding(false);
   };
 
+  const onUpdated = (g: Goal) => {
+    setGoals((prev) => prev.map((x) => (x.id === g.id ? g : x)));
+    setEditing(false);
+  };
+
+  const onDeleted = (id: string) => {
+    setGoals((prev) => {
+      const left = prev.filter((g) => g.id !== id);
+      setActiveId(left[0]?.id ?? null);
+      return left;
+    });
+    setEditing(false);
+  };
+
   if (!loaded) return null;
 
   const active = goals.find((g) => g.id === activeId);
 
-  if (!active || adding) {
+  if (!active || adding || editing) {
+    const target = editing ? active : undefined;
     return (
       <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col justify-center px-6 py-16">
         <GoalSetup
-          onCreated={onCreated}
-          onCancel={goals.length ? () => setAdding(false) : undefined}
+          key={target?.id ?? "new"}
+          goal={target}
+          onSaved={target ? onUpdated : onCreated}
+          onDeleted={target ? onDeleted : undefined}
+          onCancel={
+            goals.length ? () => (editing ? setEditing(false) : setAdding(false)) : undefined
+          }
         />
       </main>
     );
@@ -43,7 +80,14 @@ export default function CheckinPage() {
 
   return (
     <main className="mx-auto flex h-dvh w-full max-w-2xl flex-col">
-      <Tabs goals={goals} activeId={active.id} onSelect={setActiveId} onAdd={() => setAdding(true)} />
+      <Tabs
+        goals={goals}
+        name={ email?.split('@')[0] ?? null }
+        activeId={active.id}
+        onSelect={setActiveId}
+        onAdd={() => setAdding(true)}
+        onEdit={() => setEditing(true)}
+      />
       {/* key remounts the thread when the tab changes, so scroll position and in-flight state don't leak between goals */}
       <Thread key={active.id} goal={active} />
     </main>
@@ -51,24 +95,45 @@ export default function CheckinPage() {
 }
 
 
+// Doubles as the editor. `goal` present means editing an existing one — the
+// fields, the heading and the destructive action all follow from that.
 function GoalSetup({
-  onCreated,
+  goal,
+  onSaved,
+  onDeleted,
   onCancel,
 }: {
-  onCreated: (g: Goal) => void;
+  goal?: Goal;
+  onSaved: (g: Goal) => void;
+  onDeleted?: (id: string) => void;
   onCancel?: () => void;
 }) {
-  const [text, setText] = useState("");
-  const [why, setWhy] = useState("");
+  const [text, setText] = useState(goal?.text ?? "");
+  const [why, setWhy] = useState(goal?.why ?? "");
 
-  const save = () => {
-    const g = addGoal(text, why);
-    if (g) onCreated(g);
+  const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    const saved = goal ? await updateGoal(goal.id, { text, why }) : await addGoal(text, why);
+    setSaving(false);
+    if (saved) onSaved(saved);
+  };
+
+  const remove = async () => {
+    if (!goal || !onDeleted) return;
+    setSaving(true);
+    const ok = await deleteGoal(goal.id);
+    setSaving(false);
+    if (ok) onDeleted(goal.id);
   };
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl text-foreground">What do you want?</h1>
+      <h1 className="text-xl text-foreground">
+        {goal ? "Say it differently" : "What do you want?"}
+      </h1>
 
       <textarea
         autoFocus
@@ -90,21 +155,44 @@ function GoalSetup({
       <div className="flex items-center gap-4">
         <button
           onClick={save}
-          disabled={!text.trim()}
+          disabled={saving || !text.trim()}
           className="rounded-md bg-(--accent) px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Write it down
+          {goal ? "Save" : "Write it down"}
         </button>
         {onCancel && (
           <button onClick={onCancel} className="text-sm text-(--muted)">
             Cancel
           </button>
         )}
+
+        {/* Two clicks, not confirm(): deleting takes every check-in written
+            under this goal with it, and that deserves a sentence. */}
+        {onDeleted && (
+          <div className="ml-auto">
+            {confirming ? (
+              <button
+                onClick={remove}
+                disabled={saving}
+                className="text-sm text-red-600 disabled:opacity-40"
+              >
+                Delete this and everything written under it
+              </button>
+            ) : (
+              <button
+                onClick={() => setConfirming(true)}
+                className="text-sm text-(--muted) hover:text-red-600"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <p className="text-xs text-(--muted)">
-        Only what you write in each check-in is sent to the AI. Your goals and
-        everything you keep here stay in this browser.
+        Only what you write in each check-in is sent to the AI. Everything you
+        keep here is stored in your account, where nobody else can read it.
       </p>
     </div>
   );
@@ -114,14 +202,18 @@ function GoalSetup({
 // why no card in the thread below repeats either of them.
 function Tabs({
   goals,
+  name,
   activeId,
   onSelect,
   onAdd,
+  onEdit,
 }: {
   goals: Goal[];
+  name: string | null;
   activeId: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  onEdit: () => void;
 }) {
   const active = goals.find((g) => g.id === activeId);
 
@@ -150,12 +242,25 @@ function Tabs({
         </button>
       </div>
 
-      <p className="truncate py-3 text-xs text-(--muted)">{active?.why || " "}</p>
+      <div className="flex items-baseline gap-3 py-3">
+        <p className="min-w-0 flex-1 truncate text-xs text-(--muted)">{active?.why || " "}</p>
+        <button onClick={onEdit} className="shrink-0 text-xs text-(--muted) hover:text-foreground">
+          Edit
+        </button>
+        {name && <span className="shrink-0 text-xs text-(--muted)">{name}</span>}
+        <form action="/auth/signout" method="post" className="shrink-0">
+          <button type="submit" className="text-xs text-(--muted) hover:text-foreground">
+            Sign out
+          </button>
+
+        </form>
+      </div>
     </header>
   );
 }
 
 function Thread({ goal }: { goal: Goal }) {
+  const router = useRouter()
   const [entries, setEntries] = useState<Entry[]>([]);
   const [note, setNote] = useState("");
   const [pending, setPending] = useState(false);
@@ -166,7 +271,13 @@ function Thread({ goal }: { goal: Goal }) {
   // whatever the expression evaluates to, and React reads an effect's return
   // value as its cleanup function.
   useEffect(() => {
-    setEntries(getHistory(goal.id))
+    let cancelled = false;
+    getHistory(goal.id).then((rows) => {
+      if (!cancelled) setEntries(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [goal.id]);
 
   // getHistory() is chronological, so the fresh end of the thread is the
@@ -187,10 +298,14 @@ function Thread({ goal }: { goal: Goal }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ note, goal: goal.text, why: goal.why }),
       });
+      if(res.status === 401){
+        router.push("/login")
+        return;
+      }
       if (!res.ok) throw new Error(await res.text());
 
       const result: Checkin = await res.json();
-      setEntries(addEntry(goal.id, note, result));
+      setEntries(await addEntry(goal.id, note, result));
       setNote("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
@@ -252,7 +367,7 @@ function Thread({ goal }: { goal: Goal }) {
           className="w-full resize-none rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent)"
         />
         <div className="flex items-center justify-end gap-3">
-          <span className="text-xs text-(--muted)">Enter to send · Shift+Enter for a new line</span>
+          <span className="text-xs text-(--muted)">Claude is AI and can make mistakes. Please double-check responses.</span>
           <button
             onClick={submit}
             disabled={pending || !note.trim()}

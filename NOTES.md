@@ -1714,6 +1714,262 @@ don't reach the floor. Adding or editing a tool definition invalidates all of it
 
 ---
 
+## Structured outputs
+
+The second app in this repo (`/checkin`) doesn't stream text. It asks for one
+JSON object shaped by a Zod schema, and every field is a slot the UI renders.
+
+### `.parse()`, not `.create()`
+
+```ts
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+
+const message = await client.messages.parse({
+  model: "claude-opus-5",
+  max_tokens: 2048,
+  system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+  messages: [{ role: "user", content: note }],
+  output_config: {
+    effort: "medium",
+    format: zodOutputFormat(CheckinSchema),
+  },
+});
+
+const result = message.parsed_output; // typed as z.infer<typeof CheckinSchema>
+```
+
+`format` is a constraint on generation, not a post-hoc validation — the output
+is guaranteed to fit the schema. That removes a whole class of code: no
+`JSON.parse` in a try/catch, no "the model wrapped it in ```json", no repair
+prompt.
+
+### `.nullable()`, never `.optional()`
+
+Every field must appear in the schema's `required` list. `.optional()` produces
+a schema the API rejects; `.nullable()` gives the model the "I have nothing to
+say here" escape hatch that `.optional()` was reaching for.
+
+```ts
+separation: z.string().nullable()   // works — the model can answer null
+separation: z.string().optional()   // rejected
+```
+
+This turned out to be a feature, not a workaround. A nullable field forces you
+to decide *when* it should be null, and to say so in `.describe()`. Optional
+fields let you avoid that decision, and the model fills the silence.
+
+### `.describe()` is prompt, not documentation
+
+The descriptions are sent to the model. They are the highest-leverage prompt
+surface in the request, because they sit *next to* the field being generated
+instead of a thousand tokens up in the system prompt.
+
+```ts
+capability: z.string().describe(
+  "One thing they already did, in their own words, that shows a small competence. " +
+  "State what you noticed and stop — do not explain what it proves about them, " +
+  "and never turn it into praise or a task."
+),
+```
+
+Two thirds of that string is prohibition. Every clause was added after reading
+an output that did the thing it forbids.
+
+### The schema is the product spec
+
+`lib/checkin.ts` has no `completed`, no `progress`, no `streak`. The product rule
+is "never ask whether you finished" — and a field that doesn't exist cannot be
+rendered, cannot be prompted for, and cannot come back in the JSON. Enforcing it
+in the schema is stronger than enforcing it in prose.
+
+Fields removed during the build, each because nothing rendered them:
+`entry_action`, `permission_to_stop`, `quote_id`, `your_reason`, `intensity`.
+An unused field still costs output tokens on every request.
+
+`feeling` stayed despite nothing rendering it — it's the join key to the quote
+catalog's tags and the raw data behind a planned "four self-blame days this week"
+view. Five tokens is not where the money is.
+
+## Prompting for a shape
+
+### One rule per observed failure
+
+The system prompt is ordered `WHO → LANGUAGE → NEVER → WHEN NOTHING IS WRONG →
+HOW YOU WRITE → SAFETY → LINE CATALOG`. Almost every line in `NEVER` exists
+because an output did that exact thing:
+
+- *"Never attribute a judgement to them that they did not make — naming a verdict
+  they never passed is how you plant it. Read the note for what they said, not
+  the goal."* — the `separation` field was manufacturing self-blame out of notes
+  that were plain reports of a day.
+- *"Do not close by saying the goal still matters. Not reducing the goal is a
+  constraint on what you write — it is not a thing to write."* — the model kept
+  turning a constraint into a closing sentence.
+- *"Do not use the shape 'you managed X even though Y, which shows Z'."* — a
+  single sentence template had colonized every response.
+- *"Keep the fields on separate axes; reaching for a second one is what makes it
+  borrow from a neighbour."* — `separation` was restating `capability`.
+
+### Constraints get read as the nearest number
+
+The catalog rule started as *"no longer than the original"*, and outputs came
+back truncated mid-word (`而不必变成`). Read literally, that's a character cap.
+Rewritten as *substitution, not expansion* — "same number of sentences as the
+original, and no clauses added; translating may change how long it runs, and a
+finished sentence is never traded away to stay short" — and the truncation
+stopped.
+
+### The model can't see through an enum
+
+`based_on: z.enum(QUOTE_IDS)` gave the model 69 opaque ids like `1f8k2b0`. It
+chose plausibly-shaped garbage, because it had no idea what any of them said.
+Fix: render the catalog into the system prompt, where it also caches.
+
+```ts
+export const QUOTE_CATALOG = QUOTES.map(
+  (q) => `${q.id} [${q.feelings.join(",")}] ${q.text}`,
+).join("\n");
+```
+
+The enum constrains, the catalog informs. Both are needed: without the enum the
+model invents ids, without the catalog it picks blindly.
+
+### Ids are derived, never typed
+
+Hand-written ids drift from the text they name. Hashing the text means the id
+*is* the text's identity, and editing a line changes its id — which is correct,
+because a reworded line is a different line.
+
+```ts
+function hashId(text: string): string {
+  let h = 0x811c9dc5;                       // FNV-1a
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);           // imul keeps it 32-bit
+  }
+  return (h >>> 0).toString(36).padStart(7, "0");
+}
+
+export const QUOTES: Quote[] = SEEDS.map((seed) => ({ ...seed, id: hashId(seed.text) }));
+
+if (new Set(QUOTES.map((q) => q.id)).size !== QUOTES.length) {
+  throw new Error("quotes.ts: duplicate id — two lines hash the same, reword one");
+}
+```
+
+`Math.imul` because `*` on large ints goes through float64 and loses the low
+bits. The collision check throws at import time — a duplicate id would silently
+make one line unreachable.
+
+## Where the money goes
+
+Measured on one check-in request, so the ratios matter more than the absolutes.
+
+| | tokens | share |
+|---|---|---|
+| input (uncached) | | 29% |
+| output | | 71% |
+| ↳ of which thinking | 206 of 359 | 57% |
+
+Thinking is the majority of the expensive half. So the lever is `effort`, not
+schema trimming — deleting a field saves a handful of output tokens, dropping
+one effort level saves a third of them.
+
+Adaptive thinking is **on by default** on Opus 5 with `display: "omitted"`, and
+`budget_tokens` is rejected with a 400. `output_config.effort` is the control.
+
+Latency, same request:
+
+| | |
+|---|---|
+| cold start | 21s |
+| warm, `effort: "high"` (default) | 9.5s |
+| warm, `effort: "medium"` | 7.2s |
+| warm, `effort: "low"` | ~5s |
+
+Shipped `medium`. `low` started skipping the "read the note for what they said"
+work and producing exactly the generic output the prompt spends 2000 tokens
+forbidding — the cheapest request isn't the cheapest if you don't want its answer.
+
+Caching, verified after the prompt grew: `cache_read_input_tokens: 5737` against
+2 uncached. Order is `tools → system → messages`, so the catalog and the prompt
+both sit in front of the note.
+
+## Deploying a demo that spends your money
+
+### The spend cap is the only real ceiling
+
+Everything else buys time. Workspace-level limit in the Console: a dedicated
+workspace, its own API key, a $10–20 monthly cap. Auto-reload **off** — a cap
+that refills itself is not a cap.
+
+The demo key is not the key in `.env.local`. Rotating one shouldn't break the
+other, and a leaked demo key should be revocable without touching local work.
+
+### Per-IP rate limiting, honestly labelled
+
+`lib/rate-limit.ts` is a `Map` of timestamps with a sliding window. On
+serverless this is **not** a global limit: each warm instance keeps its own
+counters and a cold start wipes them.
+
+```ts
+export function allow(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  if (hits.size > 5000) sweep(now, windowMs);
+
+  const times = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (times.length >= limit) return false;
+
+  times.push(now);
+  hits.set(key, times);
+  return true;
+}
+```
+
+It costs nothing, needs no Redis, and stops the case that actually happens: one
+person or one script hammering one endpoint. The `sweep` matters — without it
+the map grows once per IP that ever visits.
+
+### Order the route so testing is free
+
+```ts
+export async function POST(req: Request) {
+  if (!allow(clientIp(req), LIMIT, WINDOW_MS)) return new Response(..., { status: 429 });
+  // ...then parse, then validate, then call the API
+}
+```
+
+Rate limit before the API call means you can verify the limiter in production
+with `curl -d '{}'` at zero cost — the 400s and 429s never reach Anthropic. I
+learned this the expensive way, by first testing with a valid payload.
+
+### Two routes, two counters
+
+`/api/chat` kept working while `/api/checkin` was returning 429. Separate route
+files are separate serverless functions, so separate module instances, so
+separate `Map`s. Accidental, but the right behaviour — one endpoint being abused
+shouldn't take the other down. Worth locking in with namespaced keys
+(`checkin:${ip}`) so it survives ever being merged into one function.
+
+### One household is one IP
+
+Phone on WiFi: blocked. Same phone on cellular: fine. NAT — every device behind
+the router shares one public address, so per-IP limits are per-*household*.
+Which also explains a 429 that fired at what looked like 18 requests: three of
+them came from another device on the same network.
+
+### `maxDuration` is read from the build, not by your code
+
+```ts
+export const maxDuration = 60;
+```
+
+Nothing in the app imports it. Next.js writes it into the build output, and the
+platform reads it there — it's a deploy-time declaration, not runtime config.
+Vercel's default is already **300s**, so setting 30 or 60 *lowers* the ceiling.
+Worth it for `/api/checkin`, where a request that hasn't finished in 60s is
+broken rather than slow.
+
 ## TODO
 
 ### Tool use
@@ -1737,12 +1993,16 @@ a failed send, and cancellation of an in-flight tool round. See
 - [ ] Session total, not just per-message — sum usage across the chat.
 - [ ] `messages.countTokens()` to price a request *before* sending it.
 
-### Before deploying publicly
+### Deployed
 
-- [ ] Spend cap in the Anthropic Console. Last line of defense — a public demo
-      spends the owner's money on every visitor.
-- [ ] Per-IP rate limiting.
-- [ ] Consider `output_config: { effort: "low" }` and a smaller `max_tokens`.
+- [x] Spend cap in the Anthropic Console — own workspace, own key, auto-reload off.
+- [x] Per-IP rate limiting — 20/hour, verified firing in production at zero cost.
+- [x] `effort` tuned — `medium`, not `low`. See [Where the money goes](#where-the-money-goes).
+- [ ] Namespace the rate-limit keys (`checkin:${ip}` / `chat:${ip}`) so the
+      two counters stay separate on purpose rather than by accident.
+- [ ] Rotate the old Default-workspace key out of Vercel and delete it.
+- [ ] Region-appropriate crisis resources for `needs_human`. Hand-verified only —
+      never generated.
 
 ### Polish
 
@@ -1750,3 +2010,18 @@ a failed send, and cancellation of an in-flight tool round. See
 - [ ] A "new conversation" control.
 - [ ] `key={i}` in the message list — safe while the array is append-only,
       still not a habit worth keeping.
+
+### Check-in app
+
+- [ ] Persistence — server DB + auth, so the history survives a cleared browser.
+      All storage access is already isolated in `lib/goal.ts` / `lib/history.ts`,
+      so the page components don't change. Migrate the existing localStorage
+      entries *before* swapping the implementation.
+- [ ] The privacy line in the UI ("everything you keep here stays in this
+      browser") stops being true the moment there is a server. Rewrite it
+      honestly in the same commit.
+- [ ] Grow the quote library from real `based_on: null` entries — those are the
+      cases where the model had to write its own line because the catalog had
+      nothing. `drained` is the thinnest tag.
+- [ ] A 7th feeling for comparison. The retagged comparison cluster currently
+      lands on `["anxious","self_blame"]`, which is the strongest argument for it.
