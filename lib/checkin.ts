@@ -25,7 +25,10 @@ export const CheckinSchema = z.object({
 				.enum(QUOTE_IDS).nullable()
 		})
 		.nullable()
-		.describe("If there aren't any suitable quotes in the database, write your own—but it must follow the same rules (one or two sentences, a single idea, and no consoling afterthoughts"),
+		.describe(`
+			Never null unless needs_human is true — this is the card.
+			If there aren't any suitable quotes in the database, write your own, "following the same rules (one or two sentences, a single idea, no consoling afterthoughts).
+		`),
 
 
 	separation: z
@@ -37,7 +40,14 @@ export const CheckinSchema = z.object({
 
 	capability: z
 		.string()
-		.describe("One thing they already did, in their own words, that shows a small competence. State what you noticed and stop — do not explain what it proves about them, and never turn it into praise or a task."),
+		.nullable()
+		.describe(`
+			One thing they already did, in their own words that shows a small competence. 
+			Name it warmly — this is the one place in the card that is allowed to be kind out loud.
+			Keep it to two or three sentence, and keep it about what they did, not what it makes them.
+			Do not turn it into a task.
+			Null when this note contains nothing they did: a note that is only a feeling,"a question, or a few words of agreement has no action in it to name.
+		`),
 
 	ask_for_reason: z
 		.string()

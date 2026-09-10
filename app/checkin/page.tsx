@@ -456,20 +456,22 @@ function Card({
       className={`flex flex-col gap-4 rounded-xl p-5`}
     >
       <Note>{note}</Note>
-      <div className="bg-purple-800/10 p-4 rounded-lg flex flex-col gap-4 ">
-        {c.separation && <p className="text-gray-600 text-sm">{c.separation}</p>}
+      {(c.separation || c.line || c.capability) && (
+        <div className="bg-purple-800/10 p-4 rounded-lg flex flex-col gap-4 ">
+          {c.separation && <p className="text-gray-600 text-sm">{c.separation}</p>}
 
-        {c.line && (
-          <blockquote className="border-l-2 border-(--accent) pl-4 text-lg text-foreground">
-            {c.line.text}
-            {attribution && (
-              <footer className="mt-1 text-xs text-(--muted)">— {attribution}</footer>
-            )}
-          </blockquote>
-        )}
-        <p className="text-sm text-(--muted)">{c.capability}</p>
-      </div>
+          {c.line && (
+            <blockquote className="border-l-2 border-(--accent) pl-4 text-lg text-foreground">
+              {c.line.text}
+              {attribution && (
+                <footer className="mt-1 text-xs text-(--muted)">— {attribution}</footer>
+              )}
+            </blockquote>
+          )}
 
+          {c.capability && <p className="text-sm text-(--muted)">{c.capability}</p>}
+        </div>
+      )}
       {c.ask_for_reason && <p className="text-sm text-(--muted)">{c.ask_for_reason}</p>}
     </section>
   );
