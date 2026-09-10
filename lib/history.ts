@@ -1,38 +1,46 @@
+import { createClient } from "@/lib/supabase/client";
 import type { Checkin } from "./checkin";
 
-
-
 export type Entry = {
+	id: string;
 	at: string;
 	goal_id: string;
 	note: string;
 	result: Checkin;
 };
 
-const KEY = "checkins";
+const COLUMNS = "id, at, goal_id, note, result";
 
-function readAll(): Entry[] {
-	try {
-		const raw = localStorage.getItem(KEY);
-		if (!raw) return [];
-		const all = JSON.parse(raw) as Entry[];
-		// Entries written before goals had ids belong to the migrated goal.
-		return all.map((e) => (e.goal_id ? e : { ...e, goal_id: "legacy" }));
-	} catch {
+// Chronological, oldest first — the page scrolls to the bottom.
+export async function getHistory(goalId: string): Promise<Entry[]> {
+	// RLS narrows this to your rows; `eq` narrows it to this goal. Two different
+	// filters — the first is a security boundary, the second is the query.
+	const { data, error } = await createClient()
+		.from("checkins")
+		.select(COLUMNS)
+		.eq("goal_id", goalId)
+		.order("at", { ascending: true });
+
+	if (error) {
+		console.error(error);
 		return [];
 	}
+	return (data ?? []) as Entry[];
 }
 
+export async function addEntry(goalId: string, note: string, result: Checkin): Promise<Entry[]> {
+	const { error } = await createClient()
+		.from("checkins")
+		.insert({ goal_id: goalId, note, result });
 
-export const getHistory = (goalId: string): Entry[] =>
-	readAll().filter((e) => e.goal_id === goalId);
+	if (error) console.error(error);
+	return getHistory(goalId);
+}
 
-export function addEntry(goalId: string, note: string, result: Checkin): Entry[] {
-	const entry: Entry = { at: new Date().toISOString(), goal_id: goalId, note, result };
-	try {
-		localStorage.setItem(KEY, JSON.stringify([...readAll(), entry]));
-	} catch {
-		// Storage full or blocked — the card still renders, it just isn't kept.
-	}
+// Delete, but no update: a check-in is a record of a moment. Editing one would
+// let you rewrite how a day went, which is the opposite of what this is for.
+export async function deleteEntry(id: string, goalId: string): Promise<Entry[]> {
+	const { error } = await createClient().from("checkins").delete().eq("id", id);
+	if (error) console.error(error);
 	return getHistory(goalId);
 }
