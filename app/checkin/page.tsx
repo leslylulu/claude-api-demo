@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Checkin } from "@/lib/checkin";
-import { quoteById } from "@/lib/quotes";
+// import { quoteById } from "@/lib/quotes";
 import { addGoal, deleteGoal, getGoals, updateGoal, type Goal } from "@/lib/goal";
 import { addEntry, getHistory, type Entry } from "@/lib/history";
 import { useRouter } from 'next/navigation';
@@ -293,12 +293,14 @@ function Thread({ goal }: { goal: Goal }) {
     setError("");
 
     try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const res = await fetch("/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           note, 
-          goal_id: goal.id 
+          goal_id: goal.id,
+          tz
         }),
       });
       if(res.status === 401){
@@ -435,7 +437,7 @@ function Card({
          flagged, and this branch is the opposite of alarm. */
       <section className="flex flex-col gap-3 rounded-xl border border-(--border) p-5">
         <Note>{note}</Note>
-        {c.separation && <p className="text-foreground">{c.separation}</p>}
+        {c.emotion && <p className="text-foreground">{c.emotion}</p>}
         <p className="text-foreground">
           What you’re describing is past what I can help with.
         </p>
@@ -452,31 +454,25 @@ function Card({
     );
   }
 
-  const attribution = c.line ? quoteById(c.line.based_on)?.source : undefined;
 
   return (
     <section
       className={`flex flex-col gap-4 rounded-xl p-5`}
     >
       <Note>{note}</Note>
-      {(c.separation || c.line || c.capability) && (
+      {(c.emotion || c.action ) && (
         <div className="bg-purple-800/10 p-4 rounded-lg flex flex-col gap-4 ">
-          {c.heard && <p className="text-sm text-(--muted)">{c.heard}</p>}
-          {c.separation && <p className="text-gray-600 text-sm">{c.separation}</p>}
+          {c.emotion && <p className="text-gray-600 text-sm">{c.emotion}</p>}
 
-          {c.line && (
+          {c.action && (
             <blockquote className="border-l-2 border-(--accent) pl-4 text-lg text-foreground">
-              {c.line.text}
-              {attribution && (
-                <footer className="mt-1 text-xs text-(--muted)">— {attribution}</footer>
-              )}
+              action: {c.action}
             </blockquote>
           )}
-
-          {c.capability && <p className="text-sm text-(--muted)">{c.capability}</p>}
+          {c.encouragement && <p className="text-sm text-(--muted)">❤️: {c.encouragement}</p>}
         </div>
       )}
-      {c.ask_for_reason && <p className="text-sm text-(--muted)">{c.ask_for_reason}</p>}
+      {c.ask_for_reason && <p className="text-sm text-(--muted)">{JSON.stringify(c.ask_for_reason)}</p>}
     </section>
   );
 }
