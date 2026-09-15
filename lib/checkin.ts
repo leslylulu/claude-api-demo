@@ -78,7 +78,7 @@ export const CheckinSchema = z.object({
 			Someone turning on themselves is negative.
 			That is the signal, not whether the task went well.
 
-			The core is the same in all three cases: this is the Nth time, it has been N
+			The core is the same in all three cases: it has been N
 			days, the goal is still there, they are still on the way. What changes is
 			where it lands:
 

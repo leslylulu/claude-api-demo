@@ -50,7 +50,6 @@ export type PastEntry = {
 }
 
 export type CheckinStats = {
-	total: number;
 	hard: number;
 	firstAt: string | null;
 };
@@ -73,7 +72,6 @@ export function buildContent({
 	stats,
 	timezone
 }: PromptInput) : string{
-	const streak = stats.total + 1;
 
 	const span = stats.firstAt
 		? differenceInCalendarDays(
@@ -92,7 +90,6 @@ export function buildContent({
 	return [
 		`Their goal: ${goal}`,
 		why ? `Why it matters to them: ${why}` : null,
-		`This is check-in number ${streak} for this goal.`,
 		span ? `They have been at it for ${span} days.` : null,
 		stats.hard ? `${stats.hard} of the earlier check-ins were hard days.` : null,
 		past ? `Earlier notes, oldest first:\n${past}` : null,

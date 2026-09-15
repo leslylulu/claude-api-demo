@@ -83,7 +83,6 @@ export async function POST(req: Request) {
 	const history = (recentRes.data ?? []).slice().reverse();
 
 	const stats = {
-		total: totalRes.count ?? 0,
 		hard: hardRes.count ?? 0,
 		firstAt: firstRes.data?.at ?? null,
 	};
