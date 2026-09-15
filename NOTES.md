@@ -241,7 +241,7 @@ conflicts with chunked transfer encoding.
 Once the first byte ships the status is locked at 200, so anything that can
 fail must be validated before `.stream()`. Except `.stream()` is lazy: the
 request fires on the first iteration, already inside `start()`. "Before"
-doesn't exist for upstream errors — see *Errors have to travel in-band*.
+doesn't exist for upstream errors — see _Errors have to travel in-band_.
 
 ## page.tsx
 
@@ -322,11 +322,11 @@ full each turn.
 claude.ai is **stateful**: requests go to `/chat_conversations/{uuid}/...`, the
 conversation lives in a database, the client sends only the new message.
 
-|  | claude.ai | this app |
-| --- | --- | --- |
-| History lives | server-side DB | browser memory (gone on refresh) |
-| Sent per turn | just the new message | the entire array |
-| Stopping | `POST .../stop_response` with a `completion_request_id` | close the connection |
+|               | claude.ai                                               | this app                         |
+| ------------- | ------------------------------------------------------- | -------------------------------- |
+| History lives | server-side DB                                          | browser memory (gone on refresh) |
+| Sent per turn | just the new message                                    | the entire array                 |
+| Stopping      | `POST .../stop_response` with a `completion_request_id` | close the connection             |
 
 ### Why claude.ai needs an explicit stop endpoint
 
@@ -336,8 +336,8 @@ conversation lives in a database, the client sends only the new message.
 - the network blipped
 - the tab was closed / the laptop slept
 
-These need different reactions — a blip should *not* kill the generation — so
-intent gets its own request. `completion_request_id` says *which* generation,
+These need different reactions — a blip should _not_ kill the generation — so
+intent gets its own request. `completion_request_id` says _which_ generation,
 since several can be in flight across devices, and the server still has to
 persist the partial answer so every device agrees.
 
@@ -379,7 +379,7 @@ bullets and tables are easier to follow than prose.
 
 ### The wire format had to change first
 
-Usage totals only exist *after* the last token, and headers lock once the first
+Usage totals only exist _after_ the last token, and headers lock once the first
 byte ships — plain text can carry the answer and nothing else.
 
 Fix: **NDJSON** (`application/x-ndjson`), one JSON object per line.
@@ -412,13 +412,17 @@ buffer = lines.pop() ?? ""; // trailing partial line — wait for the rest
 for (const line of lines) {
 	if (!line) continue;
 	const frame = JSON.parse(line);
-	if (frame.type === "text") { answer += frame.text; setReply(answer); }
-	else if (frame.type === "usage") { usage = frame; }
+	if (frame.type === "text") {
+		answer += frame.text;
+		setReply(answer);
+	} else if (frame.type === "usage") {
+		usage = frame;
+	}
 }
 ```
 
-Two buffers stacked: `TextDecoder` holds partial *bytes*, this holds partial
-*lines*. Skip the second and you get `Unexpected end of JSON input` — only on
+Two buffers stacked: `TextDecoder` holds partial _bytes_, this holds partial
+_lines_. Skip the second and you get `Unexpected end of JSON input` — only on
 long answers, never in a short local test.
 
 ### One line enables caching
@@ -441,23 +445,23 @@ for multi-turn chat.
 Go explicit when the prompt **ends** in per-request content (retrieved rows, a
 one-off question): the automatic breakpoint lands after that unique tail, so
 every request pays the write premium on bytes nobody reads back. Put the marker
-at the end of the *shared* part instead.
+at the end of the _shared_ part instead.
 
 ### It's a prefix match — that's the whole model
 
 Render order is `tools` → `system` → `messages`, and one changed byte
 invalidates everything after it. The silent killers all live at the front:
 
-| Anti-pattern | Why it kills the cache |
-| --- | --- |
-| `Date.now()` / a UUID in the system prompt | prefix differs every request |
-| `if (flag) system += ...` | each flag combo is a distinct prefix |
-| `JSON.stringify` over an unordered object | bytes differ run to run |
-| adding/reordering a tool mid-conversation | tools render at position 0 |
-| switching models mid-conversation | caches are model-scoped |
+| Anti-pattern                               | Why it kills the cache               |
+| ------------------------------------------ | ------------------------------------ |
+| `Date.now()` / a UUID in the system prompt | prefix differs every request         |
+| `if (flag) system += ...`                  | each flag combo is a distinct prefix |
+| `JSON.stringify` over an unordered object  | bytes differ run to run              |
+| adding/reordering a tool mid-conversation  | tools render at position 0           |
+| switching models mid-conversation          | caches are model-scoped              |
 
 Hence `SYSTEM_PROMPT` as a module-scope const, not a per-request template.
-Inject dynamic content *after* the history, never in `system`.
+Inject dynamic content _after_ the history, never in `system`.
 
 ### The three token fields are disjoint
 
@@ -474,16 +478,16 @@ well-cached one. Reading that field alone is the classic misread.
 
 Two requests sharing a ~3.6K-token prefix:
 
-| | `input` | `cache_creation` | `cache_read` |
-| --- | ---: | ---: | ---: |
-| cold | 3 | 3,643 | 0 |
-| warm | 3 | 15 | 3,643 |
+|      | `input` | `cache_creation` | `cache_read` |
+| ---- | ------: | ---------------: | -----------: |
+| cold |       3 |            3,643 |            0 |
+| warm |       3 |               15 |        3,643 |
 
 Row two is the **healthy-loop signature**: read everything so far, write only
 the delta. Effective input on turn 2 is `3 + 3643×0.1 + 15×1.25 ≈ 386` billed
 tokens instead of 3,661 — ~89% off.
 
-`cache_creation` near full conversation size on *every* request means the
+`cache_creation` near full conversation size on _every_ request means the
 prefix is being rewritten upstream. `cache_read` flat zero → anti-pattern
 table.
 
@@ -501,15 +505,15 @@ who replies after 20 minutes.
 ### The gotcha: minimum cacheable prefix
 
 Below the minimum, caching **silently does nothing** — no error, just
-`cache_creation_input_tokens: 0`. The minimum is *not* monotonic across
+`cache_creation_input_tokens: 0`. The minimum is _not_ monotonic across
 generations:
 
-| Model | Minimum |
-| --- | ---: |
-| Opus 5 | 512 |
-| Sonnet 5, **Sonnet 4.6** | 1,024 |
-| Opus 4.7 | 2,048 |
-| Opus 4.6, Haiku 4.5 | 4,096 |
+| Model                    | Minimum |
+| ------------------------ | ------: |
+| Opus 5                   |     512 |
+| Sonnet 5, **Sonnet 4.6** |   1,024 |
+| Opus 4.7                 |   2,048 |
+| Opus 4.6, Haiku 4.5      |   4,096 |
 
 `SYSTEM_PROMPT` is ~80 tokens, so **caching it alone would never have done
 anything** — the win exists only because the breakpoint sits on the growing
@@ -527,9 +531,11 @@ recomputed heights and shifted the page — CLS, one of the Core Web Vitals.
 Fix: route both through the same `Message` component.
 
 ```jsx
-{streaming && (
-  <Message streaming message={{ role: "assistant", content: reply }} />
-)}
+{
+	streaming && (
+		<Message streaming message={{ role: "assistant", content: reply }} />
+	);
+}
 ```
 
 Nothing changes on screen at commit because nothing changes in the DOM — only
@@ -550,14 +556,14 @@ block's own inline formatting context, flush against the last character.
 ```css
 .streaming > :last-child::after,
 .streaming:empty::after {
-  content: "";
-  display: inline-block; /* an inline box ignores width/height */
-  width: 0.5em;
-  height: 1em; /* em tracks font-size, so it grows inside a heading */
-  margin-left: 0.15em;
-  vertical-align: text-bottom;
-  background: currentColor; /* follows the text color into dark mode */
-  animation: cursor-blink 1s steps(2, start) infinite;
+	content: "";
+	display: inline-block; /* an inline box ignores width/height */
+	width: 0.5em;
+	height: 1em; /* em tracks font-size, so it grows inside a heading */
+	margin-left: 0.15em;
+	vertical-align: text-bottom;
+	background: currentColor; /* follows the text color into dark mode */
+	animation: cursor-blink 1s steps(2, start) infinite;
 }
 ```
 
@@ -569,7 +575,7 @@ cursor. `:empty` covers the gap before the first token arrives.
 Preflight zeroes native tag styles — right for hand-written components, wrong
 for `react-markdown` output, whose tags can't be given a class. The plugin
 styles them from the container: `.prose :where(h2):not(...)` targets
-*descendants*, so `prose` goes on the wrapper, never on the tag.
+_descendants_, so `prose` goes on the wrapper, never on the tag.
 
 Tailwind v4 registers it in CSS, not a config file:
 
@@ -612,7 +618,7 @@ conflicting source of truth.
 
 `justify-between` pushed the composer to the bottom of `main` — but `main`
 grows with the messages, so after 20 turns the input sat 5000px down the
-document. `flex-1` guarantees *at least* the viewport; it doesn't cap.
+document. `flex-1` guarantees _at least_ the viewport; it doesn't cap.
 
 Scrolling belongs to the list, not the page:
 
@@ -638,15 +644,15 @@ they scroll up to re-read. Only follow if they were already near the bottom:
 const stickToBottom = useRef(true);
 
 const handleScroll = () => {
-  const el = scrollRef.current;
-  if (!el) return;
-  const { scrollTop, scrollHeight, clientHeight } = el;
-  // leeway absorbs subpixel rounding and scroll momentum; a strict === is flaky
-  stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
+	const el = scrollRef.current;
+	if (!el) return;
+	const { scrollTop, scrollHeight, clientHeight } = el;
+	// leeway absorbs subpixel rounding and scroll momentum; a strict === is flaky
+	stickToBottom.current = scrollHeight - scrollTop - clientHeight < 100;
 };
 
 useEffect(() => {
-  if (stickToBottom.current) bottomRef.current?.scrollIntoView();
+	if (stickToBottom.current) bottomRef.current?.scrollIntoView();
 }, [reply, messages]);
 ```
 
@@ -660,7 +666,7 @@ also blocks mobile pull-to-refresh from wiping the conversation. Never
 `behavior: "smooth"` while streaming — dozens of animations a second interrupt
 each other and never catch up.
 
-### An effect's deps decide *when*, not *whether*
+### An effect's deps decide _when_, not _whether_
 
 Auto-grow first lived in the scroll effect, keyed on `[reply, messages]`.
 Typing changes neither, so it only ran when a reply arrived — correct code that
@@ -670,10 +676,10 @@ never runs at the right time. One effect, one concern, one dep list:
 // scrollHeight never reports less than the current height, so the box could
 // only ever grow without the reset-to-auto first. The pair is load-bearing.
 useEffect(() => {
-  const el = textareaRef.current;
-  if (!el) return;
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
+	const el = textareaRef.current;
+	if (!el) return;
+	el.style.height = "auto";
+	el.style.height = `${el.scrollHeight}px`;
 }, [input]);
 ```
 
@@ -683,20 +689,20 @@ useEffect(() => {
 
 Typing `nihao` opens a candidate list; Enter there commits the raw pinyin. The
 `keydown` still reaches the handler, so without a guard the message is sent,
-carrying the *previous* value — React state hasn't updated yet.
+carrying the _previous_ value — React state hasn't updated yet.
 
 ```ts
 const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-  // Enter during an IME preedit commits the raw pinyin to the field — the key
-  // never meant "send". React state also still holds the previous value here,
-  // so submitting would post the message one keystroke stale.
-  if (e.nativeEvent.isComposing) return;
+	// Enter during an IME preedit commits the raw pinyin to the field — the key
+	// never meant "send". React state also still holds the previous value here,
+	// so submitting would post the message one keystroke stale.
+	if (e.nativeEvent.isComposing) return;
 
-  // Shift+Enter falls through to the textarea's own newline handling
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault(); // otherwise the newline is inserted before we clear
-    submit();
-  }
+	// Shift+Enter falls through to the textarea's own newline handling
+	if (e.key === "Enter" && !e.shiftKey) {
+		e.preventDefault(); // otherwise the newline is inserted before we clear
+		submit();
+	}
 };
 ```
 
@@ -704,11 +710,11 @@ Space selects a candidate, not Enter — the guard is about the preedit being
 open, not about the selection key.
 
 `keyCode === 229` is the pre-`isComposing` version: recognize it in old code,
-don't write it. Safari used to fire `keydown` *after* `compositionend`, leaving
+don't write it. Safari used to fire `keydown` _after_ `compositionend`, leaving
 `isComposing` false — why older libraries track `onCompositionStart`/`End` in a
 ref. Fixed now; if a bug is Safari-only, suspect event ordering first.
 
-`disabled` guards the *Send* half only. Disabling while streaming kills Stop
+`disabled` guards the _Send_ half only. Disabling while streaming kills Stop
 exactly when it's most wanted.
 
 ### Scrollbars: transparent, not hidden
@@ -776,9 +782,9 @@ body (for logs); `err.error.error.message` is the human sentence (for users).
 // err.message on an APIError is the status plus the whole raw JSON body. The
 // human-readable sentence lives in the parsed payload; dig it out.
 const apiErrorMessage = (err: unknown) => {
-  if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
-  const body = err.error as { error?: { message?: string } } | undefined;
-  return `${err.status}: ${body?.error?.message ?? err.message}`;
+	if (!(err instanceof Anthropic.APIError)) return "Upstream request failed.";
+	const body = err.error as { error?: { message?: string } } | undefined;
+	return `${err.status}: ${body?.error?.message ?? err.message}`;
 };
 ```
 
@@ -951,11 +957,11 @@ The price of a stateless server: **context produced inside one request is gone
 unless handed to the client.** Fixing it means new frames carrying the
 authoritative `content` block arrays, which splits the protocol in two:
 
-| | display frames | commit frames |
-|---|---|---|
-| granularity | one per token | one per round |
-| payload | text fragment | full `ContentBlock[]` |
-| consumer | `setReply()` | `setMessages()` |
+|             | display frames | commit frames         |
+| ----------- | -------------- | --------------------- |
+| granularity | one per token  | one per round         |
+| payload     | text fragment  | full `ContentBlock[]` |
+| consumer    | `setReply()`   | `setMessages()`       |
 
 `ChatMessage` already extends `Anthropic.MessageParam`, whose `content` is
 `string | ContentBlockParam[]`, and `renderContent` already branches on the
@@ -1001,20 +1007,20 @@ byte makes every cached turn behind it uncacheable.
 ```ts
 type Frame =
 	| { type: "text"; text: string }
-	| { type: "turn", content: Anthropic.ContentBlock[] }
+	| { type: "turn"; content: Anthropic.ContentBlock[] }
 	| {
 			type: "usage";
 			model: string;
 			stop_reason: Anthropic.Message["stop_reason"];
 			usage: Anthropic.Usage;
-		}
+	  }
 	| { type: "error"; message: string }
-	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] }
+	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] };
 ```
 
 The API's own block enum is wider — `thinking`, `tool_use`, `tool_result`,
 `text`, `usage`, `image`, `citation`, plus event types like `start`, `error`,
-`metadata`. This union is only what *this app* puts on the wire.
+`metadata`. This union is only what _this app_ puts on the wire.
 
 **`apiErrorMessage` — dig the sentence out**
 
@@ -1046,7 +1052,7 @@ const totals = {
 	input_tokens: 0,
 	output_tokens: 0,
 	cache_creation_input_tokens: 0,
-	cache_read_input_tokens: 0
+	cache_read_input_tokens: 0,
 };
 ```
 
@@ -1056,11 +1062,17 @@ them, so the numbers have to be carried across rounds.
 **Streaming the deltas**
 
 ```ts
-const stream = client.messages.stream({ model: MODEL, /* ... */ messages: history });
+const stream = client.messages.stream({
+	model: MODEL,
+	/* ... */ messages: history,
+});
 currentStream = stream;
 
 for await (const event of stream) {
-	if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+	if (
+		event.type === "content_block_delta" &&
+		event.delta.type === "text_delta"
+	) {
 		controller.enqueue(frame({ type: "text", text: event.delta.text }));
 	}
 }
@@ -1080,12 +1092,14 @@ stream is done.
 
 ```ts
 if (final.stop_reason !== "tool_use") {
-	controller.enqueue(frame({
-		type: "usage",
-		model: final.model,
-		stop_reason: final.stop_reason,
-		usage: { ...final.usage, ...totals }
-	}));
+	controller.enqueue(
+		frame({
+			type: "usage",
+			model: final.model,
+			stop_reason: final.stop_reason,
+			usage: { ...final.usage, ...totals },
+		}),
+	);
 
 	controller.close();
 	return; // only successful exit
@@ -1100,15 +1114,15 @@ instead of returning here means we ran out of rounds.
 
 ```ts
 const calls = final.content.filter(
-	(b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+	(b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
 );
 
 const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
-	calls.map(async (call) => ({
+	calls.map(async call => ({
 		type: "tool_result" as const,
 		tool_use_id: call.id,
 		content: await runTool(call.name, call.input),
-	}))
+	})),
 );
 ```
 
@@ -1118,10 +1132,12 @@ the final answer.
 **Running out of rounds is an answer too**
 
 ```ts
-controller.enqueue(frame({
-	type: "error",
-	message: `Stopped after ${MAX_ROUNDS} tool rounds without a final answer.`
-}));
+controller.enqueue(
+	frame({
+		type: "error",
+		message: `Stopped after ${MAX_ROUNDS} tool rounds without a final answer.`,
+	}),
+);
 controller.close();
 ```
 
@@ -1158,12 +1174,12 @@ Client aborted — stop paying for tokens nobody will read. `currentStream`, not
 
 ```ts
 export type ChatMessage = Anthropic.MessageParam & {
-  stopped?: boolean;
-  usage?: UsageInfo;
+	stopped?: boolean;
+	usage?: UsageInfo;
 };
 
 const toPayload = (messages: ChatMessage[]): Anthropic.MessageParam[] =>
-  messages.map(({ role, content }) => ({ role, content }));
+	messages.map(({ role, content }) => ({ role, content }));
 ```
 
 `stopped` is UI metadata, not part of the API payload — it has to be stripped
@@ -1209,8 +1225,8 @@ tail back until the next chunk completes it.
 
 ```ts
 if (frame.type === "text") {
-  answerText += frame.text;
-  setReply([{ type: "text", text: answerText }]);
+	answerText += frame.text;
+	setReply([{ type: "text", text: answerText }]);
 }
 ```
 
@@ -1284,8 +1300,8 @@ answer. `not-prose` keeps the typography plugin off it.
 
 ```tsx
 <details className="not-prose my-3 border-l-2 border-(--border) pl-3 font-mono">
-  <summary>result · {text.length} chars</summary>
-  <pre className="mt-1 max-h-64 overflow-auto ...">{body}</pre>
+	<summary>result · {text.length} chars</summary>
+	<pre className="mt-1 max-h-64 overflow-auto ...">{body}</pre>
 </details>
 ```
 
@@ -1296,14 +1312,14 @@ business shouting. `<details>` collapses it with zero JS and zero state.
 
 ```tsx
 function UsageLine({ usage }: { usage: NonNullable<ChatMessage["usage"]> }) {
-  const s = summarize(usage);
-  return (
-    <div className="font-mono text-[11px] text-(--muted)">
-      {s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
-      {s.uncached} fresh) → {s.outputTokens} out
-      {s.cost !== null && ` · $${s.cost.toFixed(5)}`}
-    </div>
-  );
+	const s = summarize(usage);
+	return (
+		<div className="font-mono text-[11px] text-(--muted)">
+			{s.promptTokens} in ({s.cacheRead} cached · {s.cacheWrite} new ·{" "}
+			{s.uncached} fresh) → {s.outputTokens} out
+			{s.cost !== null && ` · $${s.cost.toFixed(5)}`}
+		</div>
+	);
 }
 ```
 
@@ -1371,7 +1387,7 @@ const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		e.preventDefault();
 		submit();
 	}
-}
+};
 ```
 
 Shift+Enter falls through to the textarea's own newline handling; `isComposing`
@@ -1386,7 +1402,7 @@ guards the IME preedit — see
 {streaming && <Message streaming message={{role: "assistant", content: reply}} />}
 ```
 
-`dvh` = dynamic viewport height. The in-flight answer renders *after* history,
+`dvh` = dynamic viewport height. The in-flight answer renders _after_ history,
 so order stays chronological.
 
 ### `app/globals.css`
@@ -1409,7 +1425,7 @@ this section is the code plus the one-line why.
 ```css
 .prose :not(.not-prose *) code::before,
 .prose :not(.not-prose *) code::after {
-  content: none;
+	content: none;
 }
 ```
 
@@ -1418,15 +1434,21 @@ this section is the code plus the one-line why.
 **Compress the heading scale**
 
 ```css
-.prose :is(h1, h2) { font-size: 1.25em; }
-.prose :is(h3, h4) { font-size: 1.05em; }
-
-.prose :is(h1, h2, h3, h4) code {
-  font-size: inherit;
-  font-weight: inherit;
+.prose :is(h1, h2) {
+	font-size: 1.25em;
+}
+.prose :is(h3, h4) {
+	font-size: 1.05em;
 }
 
-.prose > :first-child { margin-top: 0; }
+.prose :is(h1, h2, h3, h4) code {
+	font-size: inherit;
+	font-weight: inherit;
+}
+
+.prose > :first-child {
+	margin-top: 0;
+}
 ```
 
 `prose`'s editorial scale (h1 at 2.2em) shouts in a chat column. Heading code
@@ -1437,16 +1459,16 @@ child has nothing above it.
 
 ```css
 .prose :not(.not-prose *) code {
-  background: var(--code-bg);
-  padding: 0.15em 0.35em;
-  /* ... */
+	background: var(--code-bg);
+	padding: 0.15em 0.35em;
+	/* ... */
 }
 
 .prose :not(.not-prose *) pre code {
-  background: none;
-  color: inherit;
-  padding: 0;
-  /* ... */
+	background: none;
+	color: inherit;
+	padding: 0;
+	/* ... */
 }
 ```
 
@@ -1457,9 +1479,9 @@ land on it too — reset them.
 
 ```css
 .prose {
-  --tw-prose-body: var(--foreground);
-  --tw-prose-links: var(--accent);
-  /* ... */
+	--tw-prose-body: var(--foreground);
+	--tw-prose-links: var(--accent);
+	/* ... */
 }
 ```
 
@@ -1470,12 +1492,12 @@ Reassigning the plugin's own custom properties is the supported retheme.
 ```css
 .streaming > :last-child::after,
 .streaming:empty::after {
-  content: "";
-  display: inline-block;
-  width: 0.5em;
-  height: 1em;              /* em: grows inside a heading */
-  background: currentColor; /* follows dark mode */
-  animation: cursor-blink 1s steps(2, start) infinite;
+	content: "";
+	display: inline-block;
+	width: 0.5em;
+	height: 1em; /* em: grows inside a heading */
+	background: currentColor; /* follows dark mode */
+	animation: cursor-blink 1s steps(2, start) infinite;
 }
 ```
 
@@ -1486,15 +1508,19 @@ Markdown emits block tags, and a block + an inline span can't share a line.
 
 ```css
 .scroll-slim {
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent; /* thumb, track */
+	scrollbar-gutter: stable;
+	scrollbar-width: thin;
+	scrollbar-color: transparent transparent; /* thumb, track */
 }
 
-.scroll-slim::-webkit-scrollbar { width: 4px; }
-.scroll-slim::-webkit-scrollbar-thumb { background: transparent; }
+.scroll-slim::-webkit-scrollbar {
+	width: 4px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+	background: transparent;
+}
 .scroll-slim:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--border) 30%, transparent);
+	background: color-mix(in srgb, var(--border) 30%, transparent);
 }
 ```
 
@@ -1512,18 +1538,21 @@ is that the model keeps talking.
 
 ### Three ways to report a failure — only one of them works
 
-| Approach | What the model sees | What the user sees |
-| --- | --- | --- |
-| `throw`, let it reach the outer catch | Nothing — the turn is over | Stream cuts off, a red error |
+| Approach                                          | What the model sees                 | What the user sees                                         |
+| ------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `throw`, let it reach the outer catch             | Nothing — the turn is over          | Stream cuts off, a red error                               |
 | Ordinary `tool_result` with `"error"` in the text | A normal result it has to interpret | The model may treat the error as data and invent an answer |
-| **`tool_result` with `is_error: true`** | **An explicit failure signal** | The model explains and offers a next step |
+| **`tool_result` with `is_error: true`**           | **An explicit failure signal**      | The model explains and offers a next step                  |
 
 `runTool` therefore never rejects — every call must produce a result:
 
 ```ts
 export type ToolOutcome = { content: string; is_error?: boolean };
 
-export async function runTool(name: string, input: unknown): Promise<ToolOutcome> {
+export async function runTool(
+	name: string,
+	input: unknown,
+): Promise<ToolOutcome> {
 	try {
 		switch (name) {
 			case "get_weather":
@@ -1548,12 +1577,14 @@ const fail = (message: string): ToolOutcome => ({
 
 The `try` has to wrap the whole `switch`, not sit outside `Promise.all` in the
 route. `Promise.all` rejects on the first failure and discards the results that
-*did* succeed — with three parallel calls, one throw loses the other two.
+_did_ succeed — with three parallel calls, one throw loses the other two.
 
 Error text is the model's only material for recovery, so name the alternatives:
 
 ```ts
-throw new Error(`Unknown symbol: ${key}. Known symbols: ${Object.keys(PRICES).join(", ")}`);
+throw new Error(
+	`Unknown symbol: ${key}. Known symbols: ${Object.keys(PRICES).join(", ")}`,
+);
 ```
 
 Asked for `FAKECORP`, the model answered entirely out of that string — "不是一个
@@ -1654,15 +1685,17 @@ Marking is by object identity, not index — a failure can land after earlier
 is not necessarily last:
 
 ```ts
-setMessages((prev) => prev.map((m) => (m === userMessage ? { ...m, failed: true } : m)));
+setMessages(prev =>
+	prev.map(m => (m === userMessage ? { ...m, failed: true } : m)),
+);
 ```
 
 Retry then needs no state surgery of its own:
 
 ```ts
 const retry = () => {
-  const failed = messages.findLast((m) => m.failed);
-  if (failed && typeof failed.content === "string") send(failed.content);
+	const failed = messages.findLast(m => m.failed);
+	if (failed && typeof failed.content === "string") send(failed.content);
 };
 ```
 
@@ -1689,7 +1722,11 @@ re-renders.
 `turn` frames carry a thinking block with empty text and a signature:
 
 ```json
-{"type":"thinking","thinking":"","signature":"EpADCpABCBEYAipAkwtAISXFRc6h..."}
+{
+	"type": "thinking",
+	"thinking": "",
+	"signature": "EpADCpABCBEYAipAkwtAISXFRc6h..."
+}
 ```
 
 It must be echoed back unchanged and stay first in the assistant content. Storing
@@ -1725,14 +1762,20 @@ JSON object shaped by a Zod schema, and every field is a slot the UI renders.
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 
 const message = await client.messages.parse({
-  model: "claude-opus-5",
-  max_tokens: 2048,
-  system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-  messages: [{ role: "user", content: note }],
-  output_config: {
-    effort: "medium",
-    format: zodOutputFormat(CheckinSchema),
-  },
+	model: "claude-opus-5",
+	max_tokens: 2048,
+	system: [
+		{
+			type: "text",
+			text: SYSTEM_PROMPT,
+			cache_control: { type: "ephemeral" },
+		},
+	],
+	messages: [{ role: "user", content: note }],
+	output_config: {
+		effort: "medium",
+		format: zodOutputFormat(CheckinSchema),
+	},
 });
 
 const result = message.parsed_output; // typed as z.infer<typeof CheckinSchema>
@@ -1750,18 +1793,18 @@ a schema the API rejects; `.nullable()` gives the model the "I have nothing to
 say here" escape hatch that `.optional()` was reaching for.
 
 ```ts
-separation: z.string().nullable()   // works — the model can answer null
-separation: z.string().optional()   // rejected
+separation: z.string().nullable(); // works — the model can answer null
+separation: z.string().optional(); // rejected
 ```
 
 This turned out to be a feature, not a workaround. A nullable field forces you
-to decide *when* it should be null, and to say so in `.describe()`. Optional
+to decide _when_ it should be null, and to say so in `.describe()`. Optional
 fields let you avoid that decision, and the model fills the silence.
 
 ### `.describe()` is prompt, not documentation
 
 The descriptions are sent to the model. They are the highest-leverage prompt
-surface in the request, because they sit *next to* the field being generated
+surface in the request, because they sit _next to_ the field being generated
 instead of a thousand tokens up in the system prompt.
 
 ```ts
@@ -1798,23 +1841,23 @@ The system prompt is ordered `WHO → LANGUAGE → NEVER → WHEN NOTHING IS WRO
 HOW YOU WRITE → SAFETY → LINE CATALOG`. Almost every line in `NEVER` exists
 because an output did that exact thing:
 
-- *"Never attribute a judgement to them that they did not make — naming a verdict
+- _"Never attribute a judgement to them that they did not make — naming a verdict
   they never passed is how you plant it. Read the note for what they said, not
-  the goal."* — the `separation` field was manufacturing self-blame out of notes
+  the goal."_ — the `separation` field was manufacturing self-blame out of notes
   that were plain reports of a day.
-- *"Do not close by saying the goal still matters. Not reducing the goal is a
-  constraint on what you write — it is not a thing to write."* — the model kept
+- _"Do not close by saying the goal still matters. Not reducing the goal is a
+  constraint on what you write — it is not a thing to write."_ — the model kept
   turning a constraint into a closing sentence.
-- *"Do not use the shape 'you managed X even though Y, which shows Z'."* — a
+- _"Do not use the shape 'you managed X even though Y, which shows Z'."_ — a
   single sentence template had colonized every response.
-- *"Keep the fields on separate axes; reaching for a second one is what makes it
-  borrow from a neighbour."* — `separation` was restating `capability`.
+- _"Keep the fields on separate axes; reaching for a second one is what makes it
+  borrow from a neighbour."_ — `separation` was restating `capability`.
 
 ### Constraints get read as the nearest number
 
-The catalog rule started as *"no longer than the original"*, and outputs came
+The catalog rule started as _"no longer than the original"_, and outputs came
 back truncated mid-word (`而不必变成`). Read literally, that's a character cap.
-Rewritten as *substitution, not expansion* — "same number of sentences as the
+Rewritten as _substitution, not expansion_ — "same number of sentences as the
 original, and no clauses added; translating may change how long it runs, and a
 finished sentence is never traded away to stay short" — and the truncation
 stopped.
@@ -1827,7 +1870,7 @@ Fix: render the catalog into the system prompt, where it also caches.
 
 ```ts
 export const QUOTE_CATALOG = QUOTES.map(
-  (q) => `${q.id} [${q.feelings.join(",")}] ${q.text}`,
+	q => `${q.id} [${q.feelings.join(",")}] ${q.text}`,
 ).join("\n");
 ```
 
@@ -1837,23 +1880,28 @@ model invents ids, without the catalog it picks blindly.
 ### Ids are derived, never typed
 
 Hand-written ids drift from the text they name. Hashing the text means the id
-*is* the text's identity, and editing a line changes its id — which is correct,
+_is_ the text's identity, and editing a line changes its id — which is correct,
 because a reworded line is a different line.
 
 ```ts
 function hashId(text: string): string {
-  let h = 0x811c9dc5;                       // FNV-1a
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);           // imul keeps it 32-bit
-  }
-  return (h >>> 0).toString(36).padStart(7, "0");
+	let h = 0x811c9dc5; // FNV-1a
+	for (let i = 0; i < text.length; i++) {
+		h ^= text.charCodeAt(i);
+		h = Math.imul(h, 0x01000193); // imul keeps it 32-bit
+	}
+	return (h >>> 0).toString(36).padStart(7, "0");
 }
 
-export const QUOTES: Quote[] = SEEDS.map((seed) => ({ ...seed, id: hashId(seed.text) }));
+export const QUOTES: Quote[] = SEEDS.map(seed => ({
+	...seed,
+	id: hashId(seed.text),
+}));
 
-if (new Set(QUOTES.map((q) => q.id)).size !== QUOTES.length) {
-  throw new Error("quotes.ts: duplicate id — two lines hash the same, reword one");
+if (new Set(QUOTES.map(q => q.id)).size !== QUOTES.length) {
+	throw new Error(
+		"quotes.ts: duplicate id — two lines hash the same, reword one",
+	);
 }
 ```
 
@@ -1865,11 +1913,11 @@ make one line unreachable.
 
 Measured on one check-in request, so the ratios matter more than the absolutes.
 
-| | tokens | share |
-|---|---|---|
-| input (uncached) | | 29% |
-| output | | 71% |
-| ↳ of which thinking | 206 of 359 | 57% |
+|                     | tokens     | share |
+| ------------------- | ---------- | ----- |
+| input (uncached)    |            | 29%   |
+| output              |            | 71%   |
+| ↳ of which thinking | 206 of 359 | 57%   |
 
 Thinking is the majority of the expensive half. So the lever is `effort`, not
 schema trimming — deleting a field saves a handful of output tokens, dropping
@@ -1880,12 +1928,12 @@ Adaptive thinking is **on by default** on Opus 5 with `display: "omitted"`, and
 
 Latency, same request:
 
-| | |
-|---|---|
-| cold start | 21s |
+|                                  |      |
+| -------------------------------- | ---- |
+| cold start                       | 21s  |
 | warm, `effort: "high"` (default) | 9.5s |
-| warm, `effort: "medium"` | 7.2s |
-| warm, `effort: "low"` | ~5s |
+| warm, `effort: "medium"`         | 7.2s |
+| warm, `effort: "low"`            | ~5s  |
 
 Shipped `medium`. `low` started skipping the "read the note for what they said"
 work and producing exactly the generic output the prompt spends 2000 tokens
@@ -1914,15 +1962,15 @@ counters and a cold start wipes them.
 
 ```ts
 export function allow(key: string, limit: number, windowMs: number): boolean {
-  const now = Date.now();
-  if (hits.size > 5000) sweep(now, windowMs);
+	const now = Date.now();
+	if (hits.size > 5000) sweep(now, windowMs);
 
-  const times = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
-  if (times.length >= limit) return false;
+	const times = (hits.get(key) ?? []).filter(t => now - t < windowMs);
+	if (times.length >= limit) return false;
 
-  times.push(now);
-  hits.set(key, times);
-  return true;
+	times.push(now);
+	hits.set(key, times);
+	return true;
 }
 ```
 
@@ -1954,7 +2002,7 @@ shouldn't take the other down. Worth locking in with namespaced keys
 ### One household is one IP
 
 Phone on WiFi: blocked. Same phone on cellular: fine. NAT — every device behind
-the router shares one public address, so per-IP limits are per-*household*.
+the router shares one public address, so per-IP limits are per-_household_.
 Which also explains a 429 that fired at what looked like 18 requests: three of
 them came from another device on the same network.
 
@@ -1966,7 +2014,7 @@ export const maxDuration = 60;
 
 Nothing in the app imports it. Next.js writes it into the build output, and the
 platform reads it there — it's a deploy-time declaration, not runtime config.
-Vercel's default is already **300s**, so setting 30 or 60 *lowers* the ceiling.
+Vercel's default is already **300s**, so setting 30 or 60 _lowers_ the ceiling.
 Worth it for `/api/checkin`, where a request that hasn't finished in 60s is
 broken rather than slow.
 
@@ -1991,7 +2039,7 @@ a failed send, and cancellation of an in-flight tool round. See
       an assertion, not a one-time eyeball. Tool definitions sit in front of the
       prefix — editing one invalidates everything.
 - [ ] Session total, not just per-message — sum usage across the chat.
-- [ ] `messages.countTokens()` to price a request *before* sending it.
+- [ ] `messages.countTokens()` to price a request _before_ sending it.
 
 ### Deployed
 
@@ -2016,7 +2064,7 @@ a failed send, and cancellation of an in-flight tool round. See
 - [ ] Persistence — server DB + auth, so the history survives a cleared browser.
       All storage access is already isolated in `lib/goal.ts` / `lib/history.ts`,
       so the page components don't change. Migrate the existing localStorage
-      entries *before* swapping the implementation.
+      entries _before_ swapping the implementation.
 - [ ] The privacy line in the UI ("everything you keep here stays in this
       browser") stops being true the moment there is a server. Rewrite it
       honestly in the same commit.
@@ -2025,3 +2073,13 @@ a failed send, and cancellation of an in-flight tool round. See
       nothing. `drained` is the thinnest tag.
 - [ ] A 7th feeling for comparison. The retagged comparison cluster currently
       lands on `["anxious","self_blame"]`, which is the strongest argument for it.
+- [ ] A feeling for venting. Surfaced 2026-09-15 while testing the card
+      UI: "I drink it every day! I'm used to it! I feel bad if I don't have it! Plus, it tastes great!" — a half-joking push back
+      at the goal itself. None of the seven fit. `drained` says they are out of
+      energy; they are not. `self_blame` says the complaint points inward; it
+      points outward, at the thing being asked of them.
+- [ ] Venting also lands on the wrong `tone`. It reads negative, and negative
+      runs the whole separation machinery — but a vent passes no verdict on
+      themselves, and the prompt already says never to argue against a verdict
+      they did not pass. So the card answers a self-attack that was never made.
+      Fixing the feeling without fixing this leaves the worse half in place.

@@ -1,15 +1,17 @@
 import { createClient } from "@/lib/supabase/client";
 import type { Checkin } from "./checkin";
+import { browserTz, today } from "./day";
 
 export type Entry = {
 	id: string;
 	at: string;
+	day: string;
 	goal_id: string;
 	note: string;
 	result: Checkin;
 };
 
-const COLUMNS = "id, at, goal_id, note, result";
+const COLUMNS = "id, at, day, goal_id, note, result";
 
 // Chronological, oldest first — the page scrolls to the bottom.
 export async function getHistory(goalId: string): Promise<Entry[]> {
@@ -19,6 +21,7 @@ export async function getHistory(goalId: string): Promise<Entry[]> {
 		.from("checkins")
 		.select(COLUMNS)
 		.eq("goal_id", goalId)
+		.order("day", {ascending: true })
 		.order("at", { ascending: true });
 
 	if (error) {
@@ -29,18 +32,19 @@ export async function getHistory(goalId: string): Promise<Entry[]> {
 }
 
 export async function addEntry(goalId: string, note: string, result: Checkin): Promise<Entry[]> {
+	const tz = browserTz();
 	const { error } = await createClient()
 		.from("checkins")
-		.insert({ goal_id: goalId, note, result });
+		.insert({ 
+			goal_id: goalId, 
+			note, 
+			result,
+			tz,
+			day: today(tz)
+		});
 
 	if (error) console.error(error);
 	return getHistory(goalId);
 }
 
-// Delete, but no update: a check-in is a record of a moment. Editing one would
-// let you rewrite how a day went, which is the opposite of what this is for.
-export async function deleteEntry(id: string, goalId: string): Promise<Entry[]> {
-	const { error } = await createClient().from("checkins").delete().eq("id", id);
-	if (error) console.error(error);
-	return getHistory(goalId);
-}
+

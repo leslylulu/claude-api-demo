@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { allow, clientIp } from "@/lib/rate-limit";
 import { runCheckIn } from "@/lib/checkin-run";
+import { today, dayNumber } from "@/lib/day";
 
 
 const LIMIT = 20;
@@ -32,11 +33,9 @@ export async function POST(req: Request) {
 	}
 
 	
-	const { note, goal_id, tz } = await req.json();
+	const { note, goal_id } = await req.json();
 
-	const timezone =
-		typeof tz === "string" && VALID_TIMEZONES.has(tz) ? tz : "UTC";
-
+	
 	if (typeof note !== "string" || !note.trim()) {
 		return new Response("note is required", { status: 400 });
 	}
@@ -44,9 +43,18 @@ export async function POST(req: Request) {
 		return new Response("goal_id is required", { status: 400 });
 	}
 
+	const { data: profile } = await supabase
+		.from("profiles")
+		.select("timezone")
+		.eq("id", user.id)
+		.single()
+
+	const tz = profile?.timezone ?? "UTC"
+	const timezone = VALID_TIMEZONES.has(tz) ? tz : "UTC"
+
 		const { data: goal } = await supabase
 		.from("goals")
-		.select("text, why")
+		.select("text, why, created_day")
 		.eq("id", goal_id)
 		.eq("user_id", user.id)
 		.single();
@@ -55,38 +63,41 @@ export async function POST(req: Request) {
 		return new Response("goal not found", { status: 404 })
 	}
 
-	const [recentRes, totalRes, hardRes, firstRes] = await Promise.all([
+	const [tonesRes, recentRes] = await Promise.all([
 		supabase
 			.from("checkins")
-			.select("at, note")
+			.select("day, tone:result->>tone")
+			.eq("goal_id", goal_id),
+		// Five rows, wide column — this is the memory query. Kept separate so
+		// the count never drags 300 notes across the wire.
+		supabase
+			.from("checkins")
+			.select("day, note")
 			.eq("goal_id", goal_id)
 			.order("at", { ascending: false })
 			.limit(5),
-		supabase
-			.from("checkins")
-			.select("*", { count: "exact", head: true })
-			.eq("goal_id", goal_id),
-		supabase
-			.from("checkins")
-			.select("*", { count: "exact", head: true })
-			.eq("goal_id", goal_id)
-			.eq("result->>tone", "negative"),
-		supabase
-			.from("checkins")
-			.select("at")
-			.eq("goal_id", goal_id)
-			.order("at", { ascending: true })
-			.limit(1)
-			.maybeSingle(),
 	]);
 
-	const history = (recentRes.data ?? []).slice().reverse();
+
+	const rows = (tonesRes.data ?? []) as { day: string; tone: string | null }[];
+
+	const dayset = new Set(rows.map((r) => r.day));
+	dayset.add(today(timezone));   // today's row isn't written yet — add it here
+	// so "already checked in today" and "first
+	// time today" need no branch
+
+	const byTone = (t: string) =>
+		new Set(rows.filter((r) => r.tone === t).map((r) => r.day)).size;
 
 	const stats = {
-		hard: hardRes.count ?? 0,
-		firstAt: firstRes.data?.at ?? null,
+		days: dayset.size,
+		hardDays: byTone("negative"),
+		goodDays: byTone("positive"),
+		dayNumber: dayNumber(goal.created_day, timezone),
 	};
 
+	const history = (recentRes.data ?? []).slice().reverse();
+	
 	try {
 		const response = await runCheckIn({
 			goal: goal.text,
@@ -94,7 +105,6 @@ export async function POST(req: Request) {
 			note,
 			history,
 			stats,
-			timezone
 		})
 
 		// console.log(JSON.stringify(response.content, null, 2));

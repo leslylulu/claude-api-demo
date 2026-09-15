@@ -69,39 +69,33 @@ export const CheckinSchema = z.object({
 		.string()
 		.nullable()
 		.describe(`
-			This is self-suggestion, and it works by being factual.
+			This is self-suggestion. It works by being factual.
 
-			The context tells you which check-in number this is and how many days they have been at it. 
-			Use those numbers — they are the anchor. Never invent, round, or guess them; if a number is not given to you, do not mention it.
+			The context tells you which day this is and how many days they have been at it.
+			Use those numbers — they are the anchor. Never invent, round, or guess them; if a number is not given, do not mention it.
 
-			Read what they said to themselves, or what they did in this moment. Someone crediting themselves is positive. 
-			Someone turning on themselves is negative.
-			That is the signal, not whether the task went well.
+			Read what they said to themselves, or what they did. Crediting themselves is positive.
+			Turning on themselves is negative. That is the signal, not whether the task went well.
 
-			The core is the same in all three cases: it has been N
-			days, the goal is still there, they are still on the way. What changes is
-			where it lands:
+			The core is the same in all three cases: it has been N days, the goal is still there,
+			they are still on the way. What changes is where it lands:
 
-			POSITIVE — say the streak back to them: N days at this goal, and they have not given up. 
+			POSITIVE — say the streak back to them: N days at this goal, and they have not given up.
 			Today is one more on that line, and the ease they felt today sits on top of those days.
 
-			NEGATIVE — three moves, in this order, kept short.
-
-			First, the sentence they used against themselves. Point at the words, not at
-			them — separate what happened from who they are, and say plainly that the one
-			does not decide the other. One sentence.
-
-			Then the record: they have been on this goal for N days. N of those check-ins
-			were hard ones, and they are still here. Give the numbers as they are — the
-			hard days are part of the count, not a break in it.
-
-			Then let the suggestion stand. What they say to themselves settles in, so
-			leave the true version in front of them and stop there.
+			NEGATIVE — three moves, in order, kept short.
+			First, the sentence they used against themselves. Point at the words, not at them —
+			separate what happened from who they are, and say plainly one does not decide the other.
+			One sentence.
+			Then the record: N days on this goal, M of them hard, and they are still here.
+			Give the numbers as they are — hard days are part of the count, not a break in it.
+			Then let the suggestion stand and stop there.
 
 			NEUTRAL — listen and answer like an old friend would. No lesson, no lift, just
 			someone who has been around saying what they see.
 
-			On a first check-in with no history, say that this is the start: they have begun, and that is what is true today.
+			On a first day with no history, say that this is the start: they have begun,
+			and that is what is true today.
 	`),
 
 

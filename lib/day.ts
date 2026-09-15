@@ -1,17 +1,38 @@
+import { TZDate } from "@date-fns/tz";
+import { differenceInCalendarDays, parseISO } from "date-fns";
 import { type Entry } from "@/lib/history";
 
-const isToday = (at: string) => new Date(at).toDateString() === new Date().toDateString();
+
+export function localDay(at: string | Date, tz: string): string {
+	const date = typeof at === 'string' ? new Date(at) : at;
+	return new TZDate(date, tz).toISOString().slice(0, 10);
+}
+
+export function today(tz: string): string{
+	return localDay(new Date(), tz)
+}
 
 
-function groupByDay(entries: Entry[]) {
-	const groups: { key: string; at: string; items: Entry[] }[] = [];
+export function browserTz():string{
+	return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+export function dayNumber(createdDay: string, tz: string): number{
+	return differenceInCalendarDays(parseISO(today(tz)), parseISO(createdDay)) + 1;
+}
+
+export const isToday = (day: string, tz: string) => day === today(tz)
+
+export function groupByDay(entries: Entry[]) {
+	const groups: { day: string; items: Entry[] }[] = [];
+
 	for (const entry of entries) {
-		const key = new Date(entry.at).toDateString();
 		const last = groups.at(-1);
-		if (last?.key === key) last.items.push(entry);
-		else groups.push({ key, at: entry.at, items: [entry] });
+		if(last?.day === entry.day){
+			last.items.push(entry)
+		}else{
+			groups.push({ day: entry.day, items: [entry]})
+		}
 	}
 	return groups;
 }
-
-export { isToday, groupByDay}

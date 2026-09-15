@@ -44,14 +44,16 @@ card.
 
 
 export type PastEntry = {
-	at: string;
+	day: string;
 	note: string;
 	noticed?: string | null;
 }
 
 export type CheckinStats = {
-	hard: number;
-	firstAt: string | null;
+	days: number;
+	hardDays: number;
+	goodDays: number;
+	dayNumber: number;
 };
 
 
@@ -61,7 +63,6 @@ export type PromptInput = {
 	note: string;
 	history?: PastEntry[];
 	stats: CheckinStats;
-	timezone: string;
 }
 
 export function buildContent({
@@ -70,28 +71,17 @@ export function buildContent({
 	note, 
 	history = [],
 	stats,
-	timezone
 }: PromptInput) : string{
 
-	const span = stats.firstAt
-		? differenceInCalendarDays(
-			TZDate.tz(timezone),
-			new TZDate(stats.firstAt, timezone),
-		) + 1
-		: null;
-
-	const past = history
-		.map((item) => {
-			const day = new TZDate(item.at, timezone).toISOString().slice(0, 10);
-			return `[${day}] ${item.note}`;
-		})
-		.join("\n");
+	const past = history.map((item) => `[${item.day}] ${item.note}`).join("\n");
 
 	return [
 		`Their goal: ${goal}`,
 		why ? `Why it matters to them: ${why}` : null,
-		span ? `They have been at it for ${span} days.` : null,
-		stats.hard ? `${stats.hard} of the earlier check-ins were hard days.` : null,
+		`This is day ${stats.dayNumber} since they set this goal.`,
+		`They have checked in on ${stats.days} of those days.`,
+		stats.hardDays ? `${stats.hardDays} of those days were hard ones.` : null,
+		stats.goodDays ? `${stats.goodDays} of those days went well.` : null,
 		past ? `Earlier notes, oldest first:\n${past}` : null,
 		`Today they wrote:\n${note}`,
 	]

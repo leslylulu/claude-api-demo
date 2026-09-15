@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 import GoalSetup from "@/components/checkin/goal-setup";
 import GoalTabs from "@/components/checkin/goal-tabs";
 import Thread from "@/components/checkin/thread"
+import { syncTimezone } from "@/lib/profile";
 
 export default function CheckinPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -29,6 +30,7 @@ export default function CheckinPage() {
       setActiveId(gs[0]?.id ?? null);
       setLoaded(true);
     });
+    syncTimezone();
     return () => {
       cancelled = true;
     };

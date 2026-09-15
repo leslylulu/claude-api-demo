@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 import { addEntry, getHistory, type Entry } from "@/lib/history";
 import { type Goal } from "@/lib/goal";
 import type { Checkin } from "@/lib/checkin";
-import { isToday, groupByDay } from "@/lib/day";
+import { isToday, groupByDay, browserTz } from "@/lib/day";
 
 import CheckinCard from "./checkin-card";
+import { parseISO } from "date-fns";
 
 
 
@@ -47,14 +48,12 @@ export default function Thread({ goal }: { goal: Goal }) {
 		setError("");
 
 		try {
-			const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 			const res = await fetch("/api/checkin", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ 
 					note, 
 					goal_id: goal.id,
-					tz
 				}),
 			});
 			if(res.status === 401){
@@ -79,14 +78,12 @@ export default function Thread({ goal }: { goal: Goal }) {
 		setError("");
 
 		try {
-			const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 			const res = await fetch("/api/checkin", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					note: text,
 					goal_id: goal.id,
-					tz
 				}),
 			});
 			if (res.status === 401) {
@@ -98,7 +95,7 @@ export default function Thread({ goal }: { goal: Goal }) {
 			const result: Checkin = await res.json();
 			setEntries(await addEntry(goal.id, text, result))
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Sagain.");
+			setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
 		} finally {
 			setAnswering(null);
 		}
@@ -111,6 +108,8 @@ export default function Thread({ goal }: { goal: Goal }) {
 			submit();
 		}
 	};
+
+	const tz = browserTz();
 
 	return (
 		<>
@@ -128,10 +127,10 @@ export default function Thread({ goal }: { goal: Goal }) {
 						)}
 
 						{groupByDay(entries).map((group) => {
-							const today = isToday(group.at);
+							const current = isToday(group.day, tz);
 							return (
-								<section key={group.key} className="mt-12 space-y-4 first:mt-0 ">
-									<DayMarker at={group.at} today={today} />
+								<section key={group.day} className="mt-12 space-y-4 first:mt-0 ">
+									<DayMarker day={group.day} today={current} />
 									{
 										group.items.map((entry) => {
 											const isLast = entry.id === entries.at(-1)?.id;
@@ -140,7 +139,7 @@ export default function Thread({ goal }: { goal: Goal }) {
 													key={entry.id}
 													note={entry.note}
 													result={entry.result}
-													today={today}
+													today={current}
 													onAnswer={isLast ? (text) => answer(entry, text) : undefined}
 													answering={answering === entry.id}
 												/>
@@ -188,7 +187,7 @@ export default function Thread({ goal }: { goal: Goal }) {
 
 
 
-function DayMarker({ at, today }: { at: string; today: boolean }) {
+function DayMarker({ day, today }: { day: string; today: boolean }) {
 	return (
 		<div
 			className={`relative text-sm ${
@@ -203,7 +202,7 @@ function DayMarker({ at, today }: { at: string; today: boolean }) {
 			/>
 			{today
 				? "Today"
-				: new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+				: parseISO(day).toLocaleDateString(undefined, { month: "short", day: "numeric"})}
 		</div>
 	);
 }
