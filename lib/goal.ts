@@ -1,13 +1,15 @@
 import { createClient } from "@/lib/supabase/client";
+import { browserTz, today } from "./day";
 
 export type Goal = {
 	id: string;
 	text: string;
 	why: string;
 	created_at: string;
+	created_day: string;
 };
 
-const COLUMNS = "id, text, why, created_at";
+const COLUMNS = "id, text, why, created_at, created_day";
 
 export async function getGoals(): Promise<Goal[]> {
 	const { data, error } = await createClient()
@@ -28,7 +30,11 @@ export async function getGoals(): Promise<Goal[]> {
 export async function addGoal(text: string, why: string): Promise<Goal | null> {
 	const { data, error } = await createClient()
 		.from("goals")
-		.insert({ text: text.trim(), why: why.trim() })
+		.insert({ 
+			text: text.trim(), 
+			why: why.trim(),
+			created_day: today(browserTz())
+		})
 		.select(COLUMNS)
 		.single();
 

@@ -1,5 +1,6 @@
 
 
+// TODO: Treat real-person quotes as new SEEDS entries, manually review them, and add them to the database, rather than having the model recall them on the spot:
 const SEEDS = [
 	// ---- self-blame ----
 	{
