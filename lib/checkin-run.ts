@@ -8,8 +8,8 @@ const client = new Anthropic();
 export const MODEL = "claude-sonnet-5";
 export const EFFORT = "medium" as const;
 
-export function runCheckIn(input: PromptInput){
-	const content = buildContent(input)
+export function runCheckIn(input: PromptInput) {
+	const content = buildContent(input);
 	// console.log('content=== ', content)
 	return client.messages.parse({
 		model: MODEL,
@@ -18,16 +18,13 @@ export function runCheckIn(input: PromptInput){
 			{
 				type: "text",
 				text: SYSTEM_PROMPT,
-				cache_control: { type: "ephemeral"}
-			}
+				cache_control: { type: "ephemeral" },
+			},
 		],
-		messages: [
-			{ role: "user", content: content }
-		],
+		messages: [{ role: "user", content: content }],
 		output_config: {
 			effort: EFFORT,
-			format: zodOutputFormat(CheckinSchema)
-		}
-	})
-	
+			format: zodOutputFormat(CheckinSchema),
+		},
+	});
 }

@@ -21,7 +21,7 @@ export async function getHistory(goalId: string): Promise<Entry[]> {
 		.from("checkins")
 		.select(COLUMNS)
 		.eq("goal_id", goalId)
-		.order("day", {ascending: true })
+		.order("day", { ascending: true })
 		.order("at", { ascending: true });
 
 	if (error) {
@@ -35,16 +35,14 @@ export async function addEntry(goalId: string, note: string, result: Checkin): P
 	const tz = browserTz();
 	const { error } = await createClient()
 		.from("checkins")
-		.insert({ 
-			goal_id: goalId, 
-			note, 
+		.insert({
+			goal_id: goalId,
+			note,
 			result,
 			tz,
-			day: today(tz)
+			day: today(tz),
 		});
 
 	if (error) console.error(error);
 	return getHistory(goalId);
 }
-
-

@@ -18,43 +18,45 @@ const SYSTEM_PROMPT = `You are a helpful assistant in a chat app.
 const TOOLS: Anthropic.Tool[] = [
 	{
 		name: "get_weather",
-		description: "Get the current weather for a given city. Use this whenever the user asks about the weather or temperature. The city must be specified in the input. Returns the current condition, temperature in Celsius, and humidity.",
+		description:
+			"Get the current weather for a given city. Use this whenever the user asks about the weather or temperature. The city must be specified in the input. Returns the current condition, temperature in Celsius, and humidity.",
 		input_schema: {
 			type: "object",
 			properties: {
 				city: { type: "string", description: "The city to get the weather for." },
 			},
 			required: ["city"],
-		}
+		},
 	},
 	{
 		name: "get_stock_price",
-		description: "Get the latest price for a stock ticker symbol. Use this when the user asks about a stock, share price, or ticker.",
+		description:
+			"Get the latest price for a stock ticker symbol. Use this when the user asks about a stock, share price, or ticker.",
 		input_schema: {
 			type: "object",
 			properties: {
 				symbol: {
-					type: "string", description: "The ticker symbol, e.g. AAPL"
+					type: "string",
+					description: "The ticker symbol, e.g. AAPL",
 				},
 			},
 			required: ["symbol"],
-		}
-	}
-]
+		},
+	},
+];
 
 // wire protocol — our frames, not the API's block enum
 type Frame =
 	| { type: "text"; text: string }
-	| { type: "turn", content: Anthropic.ContentBlock[] } 
+	| { type: "turn"; content: Anthropic.ContentBlock[] }
 	| { type: "tool_result"; content: Anthropic.ToolResultBlockParam[] }
 	| {
-		type: "usage";
-		model: string;
-		stop_reason: Anthropic.Message["stop_reason"];
-		usage: Anthropic.Usage;
-	}
-	| { type: "error"; message: string }
-
+			type: "usage";
+			model: string;
+			stop_reason: Anthropic.Message["stop_reason"];
+			usage: Anthropic.Usage;
+	  }
+	| { type: "error"; message: string };
 
 // APIError -> readable sentence
 const apiErrorMessage = (err: unknown) => {
@@ -96,7 +98,6 @@ export async function POST(req: Request) {
 
 	let currentStream: ReturnType<typeof client.messages.stream> | null = null;
 
-
 	const body = new ReadableStream<Uint8Array>({
 		async start(controller) {
 			try {
@@ -107,18 +108,17 @@ export async function POST(req: Request) {
 					input_tokens: 0,
 					output_tokens: 0,
 					cache_creation_input_tokens: 0,
-					cache_read_input_tokens: 0
+					cache_read_input_tokens: 0,
 				};
 
-				for(let round = 0; round < MAX_ROUNDS; round++) {
-
+				for (let round = 0; round < MAX_ROUNDS; round++) {
 					const stream = client.messages.stream({
 						model: MODEL,
 						max_tokens: 4096,
 						cache_control: { type: "ephemeral" },
 						system: SYSTEM_PROMPT,
 						tools: TOOLS,
-						messages: history
+						messages: history,
 					});
 
 					currentStream = stream;
@@ -129,33 +129,32 @@ export async function POST(req: Request) {
 							controller.enqueue(
 								frame({
 									type: "text",
-									text: event.delta.text
-								}));
+									text: event.delta.text,
+								}),
+							);
 						}
 					}
 
-
 					const final = await stream.finalMessage();
 					// console.log('fff ===', final)
-					const content: Anthropic.ContentBlock[] = final.stop_reason === "max_tokens" ? 
-						[
-							...final.content,
-							{
-								type: "text",
-								text: "\n\n[truncated: hit max_tokens]",
-								citations: []
-							}
-						]
-						: final.content;
-					
+					const content: Anthropic.ContentBlock[] =
+						final.stop_reason === "max_tokens"
+							? [
+									...final.content,
+									{
+										type: "text",
+										text: "\n\n[truncated: hit max_tokens]",
+										citations: [],
+									},
+								]
+							: final.content;
 
 					controller.enqueue(
 						frame({
 							type: "turn",
-							content
-						})
+							content,
+						}),
 					);
-
 
 					totals.input_tokens += final.usage.input_tokens;
 					totals.output_tokens += final.usage.output_tokens;
@@ -164,24 +163,22 @@ export async function POST(req: Request) {
 
 					// stop_reason enum: end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal | model_context_window_exceeded
 					if (final.stop_reason !== "tool_use") {
-
 						controller.enqueue(
 							frame({
 								type: "usage",
 								model: final.model,
 								stop_reason: final.stop_reason,
-								usage: { ...final.usage, ...totals }
-							})
+								usage: { ...final.usage, ...totals },
+							}),
 						);
 
 						controller.close();
 						return; // only successful exit
-					} 
-
+					}
 
 					// tool_use: round 1 fetches results, round 2 answers
 					const calls = final.content.filter(
-						(b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
+						(b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
 					);
 
 					const results: Anthropic.ToolResultBlockParam[] = await Promise.all(
@@ -191,36 +188,34 @@ export async function POST(req: Request) {
 								type: "tool_result" as const,
 								tool_use_id: call.id,
 								content: outcome.content,
-								...(outcome.is_error && { is_error: true})
-							}
-						})
+								...(outcome.is_error && { is_error: true }),
+							};
+						}),
 					);
 
-					
 					controller.enqueue(
 						frame({
 							type: "tool_result",
-							content: results
-						})
+							content: results,
+						}),
 					);
 
 					history.push({
 						role: "assistant",
-						content: final.content
+						content: final.content,
 					});
 					history.push({
 						role: "user",
-						content: results
+						content: results,
 					});
-					
 				} // end loop for MAX_ROUNDS
 
 				// ran out of rounds
 				controller.enqueue(
 					frame({
 						type: "error",
-						message: `Stopped after ${MAX_ROUNDS} tool rounds without a final answer.`
-					})
+						message: `Stopped after ${MAX_ROUNDS} tool rounds without a final answer.`,
+					}),
 				);
 				controller.close();
 			} catch (err) {
@@ -229,8 +224,8 @@ export async function POST(req: Request) {
 				controller.enqueue(
 					frame({
 						type: "error",
-						message: apiErrorMessage(err)
-					})
+						message: apiErrorMessage(err),
+					}),
 				);
 				controller.close();
 			}
@@ -239,14 +234,14 @@ export async function POST(req: Request) {
 		// client aborted
 		cancel() {
 			currentStream?.abort();
-		}
+		},
 	});
 
 	return new Response(body, {
 		headers: {
 			"Content-Type": "application/x-ndjson; charset=utf-8",
 			"Cache-Control": "no-cache, no-transform",
-			"X-Content-Type-Options": "nosniff"
-		}
+			"X-Content-Type-Options": "nosniff",
+		},
 	});
 }

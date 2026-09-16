@@ -52,7 +52,6 @@ export default function GoalTabs({
 					<button type="submit" className="text-xs text-(--muted) hover:text-foreground">
 						Sign out
 					</button>
-
 				</form>
 			</div>
 		</header>

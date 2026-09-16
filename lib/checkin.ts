@@ -2,11 +2,11 @@ import { z } from "zod";
 // import { QUOTE_IDS } from "./quotes";
 
 export const FEELINGS = [
-	"self_blame", 
+	"self_blame",
 	"anxious",
 	"drained",
 	"avoidant",
-	"stuck", 
+	"stuck",
 	"steady",
 	"comparison",
 ] as const;
@@ -15,11 +15,9 @@ export type Feeling = (typeof FEELINGS)[number];
 export const TONES = ["positive", "neutral", "negative"] as const;
 
 export const CheckinSchema = z.object({
-	
 	feeling: z
 		.enum(FEELINGS)
 		.describe("The emotional state behind what they wrote, not the state of their task."),
-
 
 	tone: z.enum(TONES).describe(`
 		How today went for them, in their own telling. 
@@ -30,10 +28,7 @@ export const CheckinSchema = z.object({
 		neutral: nothing in particular happened. A flat day, a bare status, no strong feeling either way. When you cannot tell, it is neutral.
 	`),
 
-	emotion: z
-		.string()
-		.nullable()
-		.describe(`
+	emotion: z.string().nullable().describe(`
 		A short acknowledgement is fine to open with feeling.
 
 		Then say where the feeling is coming from. Not the surface reason they already
@@ -64,11 +59,7 @@ export const CheckinSchema = z.object({
 		Say that plainly. Do not manufacture an emotion they did not express, and do not treat flatness as a problem to be fixed.
 	`),
 
-
-	action: z
-		.string()
-		.nullable()
-		.describe(`
+	action: z.string().nullable().describe(`
 			This is self-suggestion. It works by being factual.
 
 			The context tells you which day this is and how many days they have been at it.
@@ -98,10 +89,7 @@ export const CheckinSchema = z.object({
 			and that is what is true today.
 	`),
 
-
-	encouragement: z
-		.string()
-		.describe(`
+	encouragement: z.string().describe(`
 		Emojis fine. Do not restate the facts action already gave.
 
 		POSITIVE — ride the momentum. Doing a hard thing every day is already not easy, and today felt more effective than before. 
@@ -119,14 +107,13 @@ export const CheckinSchema = z.object({
 		as a person. Do not credit them for reflecting, for asking a good question, or
 		for self-awareness — those are not acts, and praising them lands as filler.
 	`),
-			
+
 	ask_for_reason: z
 		.object({
 			question: z.string(),
 			options: z.array(z.string()).min(2).max(4),
 		})
-		.nullable()
-		.describe(`
+		.nullable().describe(`
 			Use this only when you cannot tell WHY this matters to them, and knowing
 			would change what the card should say. Null otherwise — do not ask just to
 			fill the field.
@@ -142,7 +129,9 @@ export const CheckinSchema = z.object({
 
 	needs_human: z
 		.boolean()
-		.describe("True only for sustained hopelessness, self-harm, or anything beyond a hard day. When true, everything above is ignored."),
+		.describe(
+			"True only for sustained hopelessness, self-harm, or anything beyond a hard day. When true, everything above is ignored.",
+		),
 });
 
 export type Checkin = z.infer<typeof CheckinSchema>;

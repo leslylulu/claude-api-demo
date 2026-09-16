@@ -30,10 +30,10 @@ export async function getGoals(): Promise<Goal[]> {
 export async function addGoal(text: string, why: string): Promise<Goal | null> {
 	const { data, error } = await createClient()
 		.from("goals")
-		.insert({ 
-			text: text.trim(), 
+		.insert({
+			text: text.trim(),
 			why: why.trim(),
-			created_day: today(browserTz())
+			created_day: today(browserTz()),
 		})
 		.select(COLUMNS)
 		.single();

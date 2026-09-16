@@ -6,14 +6,17 @@
   --background: #fafafc;
   --foreground: #16182b;
 
-  --accent: #0e21a0;        /* navy — buttons, links, inline code */
-  --muted: #6b6f86;         /* secondary text: usage line, placeholders */
+  --accent: #0e21a0;
+  /* navy — buttons, links, inline code */
+  --muted: #6b6f86;
+  /* secondary text: usage line, placeholders */
   --border: #e2e3ec;
 
-  --bubble-user: #eef0f8;  
-  --code-bg: #eef0f8;       /* the inline-code chip */
+  --bubble-user: #eef0f8;
+  --code-bg: #eef0f8;
+  /* the inline-code chip */
   --code-fg: #0e21a0;
-  --pre-bg: #10132b;      
+  --pre-bg: #10132b;
   --pre-fg: #e6e8f5;
 }
 
@@ -58,6 +61,7 @@ body {
 .prose :is(h1, h2) {
   font-size: 1.25em;
 }
+
 .prose :is(h3, h4) {
   font-size: 1.05em;
 }
@@ -69,7 +73,7 @@ body {
 }
 
 /* no gap above the first child */
-.prose > :first-child {
+.prose> :first-child {
   margin-top: 0;
 }
 
@@ -114,24 +118,28 @@ body {
 }
 
 /* cursor as ::after; :empty covers the first-token gap */
-.streaming > :last-child::after,
+.streaming> :last-child::after,
 .streaming:empty::after {
   content: "";
   display: inline-block;
   width: 0.5em;
-  height: 1em; /* em: grows inside a heading */
+  height: 1em;
+  /* em: grows inside a heading */
   margin-left: 0.15em;
   vertical-align: text-bottom;
-  background: currentColor; /* follows dark mode */
+  background: currentColor;
+  /* follows dark mode */
   animation: cursor-blink 1s steps(2, start) infinite;
 }
 
 /* steps(): hard blink */
 @keyframes cursor-blink {
+
   0%,
   50% {
     opacity: 1;
   }
+
   50%,
   100% {
     opacity: 0;
@@ -142,8 +150,10 @@ body {
 .scroll-slim {
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: transparent transparent; /* thumb, track */
+  scrollbar-color: transparent transparent;
+  /* thumb, track */
 }
+
 .scroll-slim:hover {
   background: color-mix(in srgb, var(--border) 10%, transparent);
 }
@@ -152,10 +162,12 @@ body {
 .scroll-slim::-webkit-scrollbar {
   width: 4px;
 }
+
 .scroll-slim::-webkit-scrollbar-thumb {
   background: transparent;
   border-radius: 2px;
 }
+
 .scroll-slim:hover::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--border) 30%, transparent);
 }

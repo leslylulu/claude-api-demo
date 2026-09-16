@@ -14,7 +14,6 @@ export default function LoginPage() {
 	const [error, setError] = useState<string | null>(null);
 	const [sending, setSending] = useState(false);
 
-
 	async function sendLink(e: React.SubmitEvent<HTMLFormElement>) {
 		e.preventDefault();
 		setSending(true);
@@ -35,16 +34,16 @@ export default function LoginPage() {
 		setSending(true);
 		setError(null);
 
-		const { error } = await createClient().auth.signInWithPassword({ 
-			email, 
-			password 
+		const { error } = await createClient().auth.signInWithPassword({
+			email,
+			password,
 		});
 		setSending(false);
 
 		if (error) return setError(error.message);
 
 		router.push("/checkin");
-		router.refresh();   // Server Components still hold the logged-out render
+		router.refresh(); // Server Components still hold the logged-out render
 	}
 
 	if (sent) {
@@ -61,9 +60,7 @@ export default function LoginPage() {
 		<main className="mx-auto flex max-w-sm flex-col gap-8 px-6 py-24">
 			<div>
 				<h1 className="text-lg font-medium">Sign in</h1>
-				<p className="mt-1 text-sm opacity-60">
-					Whatever you keep here is only yours.
-				</p>
+				<p className="mt-1 text-sm opacity-60">Whatever you keep here is only yours.</p>
 			</div>
 
 			<form onSubmit={sendLink} className="flex flex-col gap-3">

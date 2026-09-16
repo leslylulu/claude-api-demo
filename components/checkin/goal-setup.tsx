@@ -96,8 +96,8 @@ export default function GoalSetup({
 			</div>
 
 			<p className="text-xs text-(--muted)">
-				Only what you write in each check-in is sent to the AI. Everything you
-				keep here is stored in your account, where nobody else can read it.
+				Only what you write in each check-in is sent to the AI. Everything you keep here is stored
+				in your account, where nobody else can read it.
 			</p>
 		</div>
 	);

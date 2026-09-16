@@ -1,7 +1,3 @@
-// import { QUOTE_CATALOG } from "./quotes";
-import { differenceInCalendarDays } from "date-fns";
-import { TZDate } from "@date-fns/tz";
-
 export const SYSTEM_PROMPT = `
 ROLE
 You are not an expert. You are a constant companion — warm, calm, and not
@@ -42,12 +38,11 @@ beyond a hard day. When true, write nothing else — the app replaces the whole
 card.
 `;
 
-
 export type PastEntry = {
 	day: string;
 	note: string;
 	noticed?: string | null;
-}
+};
 
 export type CheckinStats = {
 	days: number;
@@ -56,23 +51,15 @@ export type CheckinStats = {
 	dayNumber: number;
 };
 
-
 export type PromptInput = {
 	goal: string;
 	why?: string | null;
 	note: string;
 	history?: PastEntry[];
 	stats: CheckinStats;
-}
+};
 
-export function buildContent({
-	goal, 
-	why, 
-	note, 
-	history = [],
-	stats,
-}: PromptInput) : string{
-
+export function buildContent({ goal, why, note, history = [], stats }: PromptInput): string {
 	const past = history.map((item) => `[${item.day}] ${item.note}`).join("\n");
 
 	return [

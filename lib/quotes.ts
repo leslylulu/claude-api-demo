@@ -1,5 +1,3 @@
-
-
 // TODO: Treat real-person quotes as new SEEDS entries, manually review them, and add them to the database, rather than having the model recall them on the spot:
 const SEEDS = [
 	// ---- self-blame ----
@@ -365,7 +363,6 @@ const SEEDS = [
 type Seed = (typeof SEEDS)[number];
 export type Quote = Seed & { id: string };
 
-
 function hashId(text: string): string {
 	let h = 0x811c9dc5;
 	for (let i = 0; i < text.length; i++) {
@@ -387,6 +384,6 @@ export const QUOTE_IDS = QUOTES.map((q) => q.id) as [string, ...string[]];
 export const quoteById = (id: string | null): Quote | undefined =>
 	id ? QUOTES.find((q) => q.id === id) : undefined;
 
-export const QUOTE_CATALOG = QUOTES.map(
-	(q) => `${q.id} [${q.feelings.join(",")}] ${q.text}`,
-).join("\n");
+export const QUOTE_CATALOG = QUOTES.map((q) => `${q.id} [${q.feelings.join(",")}] ${q.text}`).join(
+	"\n",
+);

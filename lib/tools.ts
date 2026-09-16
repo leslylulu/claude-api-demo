@@ -1,4 +1,3 @@
-
 export type ToolOutcome = {
 	content: string;
 	is_error?: boolean;
@@ -6,36 +5,34 @@ export type ToolOutcome = {
 
 // const TOOL_TIMEOUT_MS = 5000
 
-
 export async function runTool(name: string, input: unknown): Promise<ToolOutcome> {
-	try{
-		switch(name){
+	try {
+		switch (name) {
 			case "get_weather":
 				return ok(await getWeather(input));
 			case "get_stock_price":
 				return ok(await getStockPrice(input));
 			default:
-				return fail(`UnKnow tool: ${name}`)
+				return fail(`UnKnow tool: ${name}`);
 		}
-	}catch(err){
-		return fail(err instanceof Error ? err.message : String(err))
+	} catch (err) {
+		return fail(err instanceof Error ? err.message : String(err));
 	}
 }
 
 const ok = (data: unknown): ToolOutcome => ({
-	content: JSON.stringify(data)
-})
-
+	content: JSON.stringify(data),
+});
 
 const fail = (message: string): ToolOutcome => ({
-	content: JSON.stringify({error: message}),
-	is_error: true
-})
+	content: JSON.stringify({ error: message }),
+	is_error: true,
+});
 
 function getWeather(input: unknown) {
-	const { city } = (input ?? {}) as { city ?: string};
+	const { city } = (input ?? {}) as { city?: string };
 
-	if (!city?.trim()) throw new Error("Missing required field: city")
+	if (!city?.trim()) throw new Error("Missing required field: city");
 
 	const conditions = ["sunny", "cloudy", "partly cloudy", "light rain", "clear"];
 	return {
@@ -46,12 +43,11 @@ function getWeather(input: unknown) {
 	};
 }
 
-
 const PRICES: Record<string, number> = { AAPL: 271.4, NVDA: 184.2, TSLA: 421.9 };
 
 function getStockPrice(input: unknown) {
 	const { symbol } = (input ?? {}) as { symbol?: string };
-	
+
 	if (!symbol?.trim()) throw new Error("Missing required field: symbol");
 
 	const key = symbol.trim().toUpperCase();
