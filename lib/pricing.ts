@@ -7,7 +7,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
 	"claude-opus-5": { input: 5, output: 25 },
 	"claude-sonnet-5": { input: 2, output: 10 },
 	"claude-sonnet-4-6": { input: 3, output: 15 },
-	"claude-haiku-4-5": { input: 1, output: 5 }
+	"claude-haiku-4-5": { input: 1, output: 5 },
 };
 
 const CACHE_READ_MULTIPLIER = 0.1;
@@ -31,9 +31,7 @@ export function summarize({ model, usage }: UsageInfo) {
 	const price = PRICING[model.replace(/-\d{8}$/, "")];
 
 	const cost = price
-		? ((uncached +
-				cacheRead * CACHE_READ_MULTIPLIER +
-				cacheWrite * CACHE_WRITE_MULTIPLIER) *
+		? ((uncached + cacheRead * CACHE_READ_MULTIPLIER + cacheWrite * CACHE_WRITE_MULTIPLIER) *
 				price.input +
 				usage.output_tokens * price.output) /
 			1_000_000
@@ -45,6 +43,6 @@ export function summarize({ model, usage }: UsageInfo) {
 		cacheRead,
 		cacheWrite,
 		outputTokens: usage.output_tokens,
-		cost
+		cost,
 	};
 }

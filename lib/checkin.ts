@@ -2,11 +2,11 @@ import { z } from "zod";
 // import { QUOTE_IDS } from "./quotes";
 
 export const FEELINGS = [
-	"self_blame", 
+	"self_blame",
 	"anxious",
 	"drained",
 	"avoidant",
-	"stuck", 
+	"stuck",
 	"steady",
 	"comparison",
 ] as const;
@@ -15,11 +15,9 @@ export type Feeling = (typeof FEELINGS)[number];
 export const TONES = ["positive", "neutral", "negative"] as const;
 
 export const CheckinSchema = z.object({
-	
 	feeling: z
 		.enum(FEELINGS)
 		.describe("The emotional state behind what they wrote, not the state of their task."),
-
 
 	tone: z.enum(TONES).describe(`
 		How today went for them, in their own telling. 
@@ -30,10 +28,7 @@ export const CheckinSchema = z.object({
 		neutral: nothing in particular happened. A flat day, a bare status, no strong feeling either way. When you cannot tell, it is neutral.
 	`),
 
-	emotion: z
-		.string()
-		.nullable()
-		.describe(`
+	emotion: z.string().nullable().describe(`
 		A short acknowledgement is fine to open with feeling.
 
 		Then say where the feeling is coming from. Not the surface reason they already
@@ -64,44 +59,57 @@ export const CheckinSchema = z.object({
 		Say that plainly. Do not manufacture an emotion they did not express, and do not treat flatness as a problem to be fixed.
 	`),
 
+	action: z.string().nullable().describe(`
+			A record, not a comment. It works by being factual, and by staying cold.
+			Encouragement is where the warmth lives, and it has nothing left to do if this
+			field has already done the lifting.
 
-	action: z
-		.string()
-		.nullable()
-		.describe(`
-			This is self-suggestion. It works by being factual.
+			No adjectives, no praise, no feelings — naming what they feel is emotion's job,
+			and saying it twice makes both weaker.
 
-			The context tells you which day this is and how many days they have been at it.
-			Use those numbers — they are the anchor. Never invent, round, or guess them; if a number is not given, do not mention it.
+			NUMBERS — default to not using them.
+			The context gives you a day count, a check-in count, and how many days were
+			hard or went well. A number recited every day is a turnstile, not a record.
 
-			Read what they said to themselves, or what they did. Crediting themselves is positive.
-			Turning on themselves is negative. That is the signal, not whether the task went well.
+			Reach for one only when BOTH hold:
+			- they passed a verdict on who they are ("I'm lazy", "I always do this"), or
+			  made a claim about their own past ("I never stick to anything", "I haven't
+			  moved in weeks"), AND
+			- the record does not agree with what they said.
 
-			The core is the same in all three cases: it has been N days, the goal is still there,
-			they are still on the way. What changes is where it lands:
+			Then set the record down beside it and stop. Do not repeat the word they used —
+			not to confirm it, not to deny it. Naming it is how you plant it. The numbers
+			do not argue. They just sit there, and that is enough.
 
-			POSITIVE — say the streak back to them: N days at this goal, and they have not given up.
-			Today is one more on that line, and the ease they felt today sits on top of those days.
+			If the record does agree with them, they are right. Use no numbers at all, and
+			never go hunting for a different one that reads better — there is always a
+			number that can be dressed up as good news, and reaching for it is how this
+			field stops being worth believing.
 
-			NEGATIVE — three moves, in order, kept short.
-			First, the sentence they used against themselves. Point at the words, not at them —
-			separate what happened from who they are, and say plainly one does not decide the other.
-			One sentence.
-			Then the record: N days on this goal, M of them hard, and they are still here.
-			Give the numbers as they are — hard days are part of the count, not a break in it.
-			Then let the suggestion stand and stop there.
+			Never invent, round, or guess a number. If it is not in the context, it does
+			not exist.
 
-			NEUTRAL — listen and answer like an old friend would. No lesson, no lift, just
-			someone who has been around saying what they see.
+			Day 1 is the one exception: with nothing behind them, say plainly that this is
+			the start.
 
-			On a first day with no history, say that this is the start: they have begun,
-			and that is what is true today.
+			EVERY OTHER DAY — which is most days — write today's fact.
+			What they did, or what they said, handed back plainly. Their own words are fair
+			material. A day count is not the only true thing about a day.
+
+			Do not walk through the earlier notes one by one. A day-by-day chronicle
+			("Day 1: ... Day 2: ... Day 3: ...") is the same turnstile wearing a different
+			coat, and the positions in that list are numbers you invented — the context
+			never gave them to you. Today is the subject. The past is there so you know
+			whether to reach for a number at all.
+
+			HOW IT READS
+			Never open by reporting the count — no "Day N since you set this goal", no
+			"N days in". If a number belongs in the sentence it belongs inside it, not at
+			the front. Let the length follow the day; some days one sentence is the whole
+			truth.
 	`),
 
-
-	encouragement: z
-		.string()
-		.describe(`
+	encouragement: z.string().describe(`
 		Emojis fine. Do not restate the facts action already gave.
 
 		POSITIVE — ride the momentum. Doing a hard thing every day is already not easy, and today felt more effective than before. 
@@ -110,8 +118,10 @@ export const CheckinSchema = z.object({
 
 		NEGATIVE — two moves, in this order, both needed.
 		First: they knew it was hard and did not quit. Most people drop it the moment it gets difficult; they are still here.
-		Second: the small step. Progress may be one step, but taking it today or tomorrow already puts them past where they are standing right now — 
-		because right now they are stopped. Every step after this one is progress.
+		Second: the count is still running. Whatever the record says today, the next
+		check-in makes it one more. That is not a task and not a suggestion — it is
+		simply how a count works, said out loud. Right now they are stopped, and a
+		number that can still move is the difference between here and not-here.
 
 		NEUTRAL — a flat day still counts. Steady is what carries a goal further than bursts do.
 
@@ -119,14 +129,13 @@ export const CheckinSchema = z.object({
 		as a person. Do not credit them for reflecting, for asking a good question, or
 		for self-awareness — those are not acts, and praising them lands as filler.
 	`),
-			
+
 	ask_for_reason: z
 		.object({
 			question: z.string(),
 			options: z.array(z.string()).min(2).max(4),
 		})
-		.nullable()
-		.describe(`
+		.nullable().describe(`
 			Use this only when you cannot tell WHY this matters to them, and knowing
 			would change what the card should say. Null otherwise — do not ask just to
 			fill the field.
@@ -142,7 +151,9 @@ export const CheckinSchema = z.object({
 
 	needs_human: z
 		.boolean()
-		.describe("True only for sustained hopelessness, self-harm, or anything beyond a hard day. When true, everything above is ignored."),
+		.describe(
+			"True only for sustained hopelessness, self-harm, or anything beyond a hard day. When true, everything above is ignored.",
+		),
 });
 
 export type Checkin = z.infer<typeof CheckinSchema>;

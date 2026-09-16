@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from 'next/navigation';
+import { useRouter } from "next/navigation";
 
 import { addEntry, getHistory, type Entry } from "@/lib/history";
 import { type Goal } from "@/lib/goal";
@@ -10,11 +10,8 @@ import { isToday, groupByDay, browserTz } from "@/lib/day";
 import CheckinCard from "./checkin-card";
 import { parseISO } from "date-fns";
 
-
-
 export default function Thread({ goal }: { goal: Goal }) {
-	
-	const router = useRouter()
+	const router = useRouter();
 	const [entries, setEntries] = useState<Entry[]>([]);
 	const [note, setNote] = useState("");
 	const [pending, setPending] = useState(false);
@@ -51,13 +48,13 @@ export default function Thread({ goal }: { goal: Goal }) {
 			const res = await fetch("/api/checkin", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ 
-					note, 
+				body: JSON.stringify({
+					note,
 					goal_id: goal.id,
 				}),
 			});
-			if(res.status === 401){
-				router.push("/login")
+			if (res.status === 401) {
+				router.push("/login");
 				return;
 			}
 			if (!res.ok) throw new Error(await res.text());
@@ -93,7 +90,7 @@ export default function Thread({ goal }: { goal: Goal }) {
 			if (!res.ok) throw new Error(await res.text());
 
 			const result: Checkin = await res.json();
-			setEntries(await addEntry(goal.id, text, result))
+			setEntries(await addEntry(goal.id, text, result));
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
 		} finally {
@@ -114,12 +111,8 @@ export default function Thread({ goal }: { goal: Goal }) {
 	return (
 		<>
 			<div className="flex-1 overflow-y-auto px-6 py-8">
-
 				<div className="relative">
-					<div
-						aria-hidden
-						className="absolute bottom-2 left-0 top-2 w-px bg-(--border)"
-					/>
+					<div aria-hidden className="absolute bottom-2 left-0 top-2 w-px bg-(--border)" />
 
 					<div className="pl-2">
 						{entries.length === 0 && (
@@ -131,21 +124,19 @@ export default function Thread({ goal }: { goal: Goal }) {
 							return (
 								<section key={group.day} className="mt-12 space-y-4 first:mt-0 ">
 									<DayMarker day={group.day} today={current} />
-									{
-										group.items.map((entry) => {
-											const isLast = entry.id === entries.at(-1)?.id;
-											return (
-												<CheckinCard
-													key={entry.id}
-													note={entry.note}
-													result={entry.result}
-													today={current}
-													onAnswer={isLast ? (text) => answer(entry, text) : undefined}
-													answering={answering === entry.id}
-												/>
-											);
-										})
-									}
+									{group.items.map((entry) => {
+										const isLast = entry.id === entries.at(-1)?.id;
+										return (
+											<CheckinCard
+												key={entry.id}
+												note={entry.note}
+												result={entry.result}
+												today={current}
+												onAnswer={isLast ? (text) => answer(entry, text) : undefined}
+												answering={answering === entry.id}
+											/>
+										);
+									})}
 								</section>
 							);
 						})}
@@ -168,7 +159,9 @@ export default function Thread({ goal }: { goal: Goal }) {
 					className="w-full resize-none rounded-xl border border-(--border) bg-(--bubble-user) px-4 py-3 text-foreground outline-none focus:border-(--accent)"
 				/>
 				<div className="flex items-center justify-end gap-3">
-					<span className="text-xs text-(--muted)">Claude is AI and can make mistakes. Please double-check responses.</span>
+					<span className="text-xs text-(--muted)">
+						Claude is AI and can make mistakes. Please double-check responses.
+					</span>
 					<button
 						onClick={submit}
 						disabled={pending || !note.trim()}
@@ -178,22 +171,13 @@ export default function Thread({ goal }: { goal: Goal }) {
 					</button>
 				</div>
 			</div>
-
-
 		</>
 	);
 }
 
-
-
-
 function DayMarker({ day, today }: { day: string; today: boolean }) {
 	return (
-		<div
-			className={`relative text-sm ${
-				today ? "font-medium text-foreground" : "text-(--muted)"
-			}`}
-		>
+		<div className={`relative text-sm ${today ? "font-medium text-foreground" : "text-(--muted)"}`}>
 			<span
 				aria-hidden
 				className={`absolute -left-2 top-1.5 h-2 w-2 -translate-x-1/2 rounded-full ring-4 ring-(--background) ${
@@ -202,7 +186,7 @@ function DayMarker({ day, today }: { day: string; today: boolean }) {
 			/>
 			{today
 				? "Today"
-				: parseISO(day).toLocaleDateString(undefined, { month: "short", day: "numeric"})}
+				: parseISO(day).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
 		</div>
 	);
 }

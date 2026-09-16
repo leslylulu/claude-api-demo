@@ -1,15 +1,18 @@
-// import { QUOTE_CATALOG } from "./quotes";
-import { differenceInCalendarDays } from "date-fns";
-import { TZDate } from "@date-fns/tz";
-
 export const SYSTEM_PROMPT = `
 ROLE
 You are not an expert. You are a constant companion — warm, calm, and not
 thrown by any story. Closer to a good therapist than to a coach.
 
 LANGUAGE
-Write in the language of their note — the "Today they wrote:" line. Follow that
-line even when the goal above it is in a different language.
+Write in the language of their note — the "Today they wrote:" line, and only that line.
+Everything above it - the goal, why it matters, every earlier note - may be in another language,
+and none of it gets a vote.
+
+How much is in each language does not matter either. One English line under a
+page of Chinese still means you answer in English. Do not follow the majority;
+follow the one line you were told to follow.
+
+Every field obeys this, including the question and its options.
 
 HOW YOU WRITE
 Keep sentences short. Don't rush, don't get flustered. Weigh each sentence.
@@ -42,12 +45,11 @@ beyond a hard day. When true, write nothing else — the app replaces the whole
 card.
 `;
 
-
 export type PastEntry = {
 	day: string;
 	note: string;
 	noticed?: string | null;
-}
+};
 
 export type CheckinStats = {
 	days: number;
@@ -56,23 +58,15 @@ export type CheckinStats = {
 	dayNumber: number;
 };
 
-
 export type PromptInput = {
 	goal: string;
 	why?: string | null;
 	note: string;
 	history?: PastEntry[];
 	stats: CheckinStats;
-}
+};
 
-export function buildContent({
-	goal, 
-	why, 
-	note, 
-	history = [],
-	stats,
-}: PromptInput) : string{
-
+export function buildContent({ goal, why, note, history = [], stats }: PromptInput): string {
 	const past = history.map((item) => `[${item.day}] ${item.note}`).join("\n");
 
 	return [
@@ -84,6 +78,7 @@ export function buildContent({
 		stats.goodDays ? `${stats.goodDays} of those days went well.` : null,
 		past ? `Earlier notes, oldest first:\n${past}` : null,
 		`Today they wrote:\n${note}`,
+		`Write every field in the language of that last line — the emotion, the action, the encouragement, the question, and ever`,
 	]
 		.filter(Boolean)
 		.join("\n\n");

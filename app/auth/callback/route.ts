@@ -1,11 +1,10 @@
 import type { EmailOtpType } from "@supabase/supabase-js";
-import { redirect } from "next/navigation"
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { cookies } from "next/headers";
 
 export async function GET(request: Request) {
-
-	const { searchParams} = new URL(request.url);
+	const { searchParams } = new URL(request.url);
 	const next = searchParams.get("next") ?? "/checkin";
 
 	// PKCE: the browser stashed a code_verifier cookie before sending the mail,
@@ -13,7 +12,6 @@ export async function GET(request: Request) {
 	const code = searchParams.get("code");
 	const token_hash = searchParams.get("token_hash");
 	const type = searchParams.get("type") as EmailOtpType | null;
-
 
 	const supabase = await createClient(await cookies());
 
@@ -27,5 +25,4 @@ export async function GET(request: Request) {
 	}
 
 	redirect("/login?error=1");
-	
 }
