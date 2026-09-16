@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "eval:run": "tsx --env-file=.env.local evals/run.ts",
+    "eval:score": "tsx evals/score.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",
