@@ -69,6 +69,7 @@ for (const c of CASES) {
 	const lines: Line[] = [];
 
 	for (const [field, want] of Object.entries(c.expect)) {
+		if (field === "mentions") continue;
 		total++;
 		const ok = check(result, field, want);
 		if (ok) passed++;
@@ -79,6 +80,19 @@ for (const c of CASES) {
 			because: ok ? undefined : c.because,
 		});
 	}
+	if (c.expect.mentions) {
+		const card = [result.emotion, result.action, result.encouragement].join(" ");
+		const missing = c.expect.mentions.filter((word) => !card.includes(word));
+		total++;
+		if (!missing.length) passed++;
+		lines.push({
+			ok: !missing.length,
+			text: `${"mentions".padEnd(16)} ${c.expect.mentions.join(" · ")}`,
+			got: missing.length ? `missing ${missing.join(" · ")}` : undefined,
+			because: missing.length ? c.because : undefined,
+		});
+	}
+
 	structure.push({ id: c.id, lines });
 }
 

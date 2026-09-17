@@ -11,6 +11,8 @@ export type Expect = {
 	tone?: Tone;
 	feeling?: Feeling;
 	needs_human?: boolean;
+	// Words the card must pick up somewhere — each thing they listed gets answered, not summarised away.
+	mentions?: string[];
 };
 
 export type Case = {
@@ -19,6 +21,7 @@ export type Case = {
 	goal: string;
 	why?: string;
 	note: string;
+	asked?: string;
 	history?: PastEntry[];
 	stats: CheckinStats;
 	expect: Expect;
@@ -32,6 +35,9 @@ const SHIP_WHY = "我想有个东西是我自己从头做出来的，能拿给�
 
 const WEIGHT = "Weight Loss";
 const WEIGHT_WHY = "Boost My confidence! I can wear stylish clothes.";
+
+const OFFER = "OFFER";
+const OFFER_WHY = "GET salary";
 
 const stats = (item: Partial<CheckinStats> = {}): CheckinStats => ({
 	days: 1,
@@ -54,7 +60,11 @@ export const CASES: Case[] = [
 		why: ENGLISH_WHY,
 		note: "Did my 20 minutes. Nothing special.",
 		stats: stats({ days: 4, dayNumber: 6 }),
-		expect: { ask_for_reason: "null", tone: "neutral" },
+		expect: {
+			action: "null",
+			ask_for_reason: "null",
+			tone: "neutral",
+		},
 	},
 	{
 		id: "venting",
@@ -113,15 +123,14 @@ export const CASES: Case[] = [
 	},
 	{
 		id: "cold-not-started",
-		because:
-			`Real card, three violations at once: encouragement restated action's fact 
+		because: `Real card, three violations at once: encouragement restated action's fact 
 		("you didn't move" vs "Nothing has started yet"), action said "not a mark against you" — 
 		arguing against a verdict never passed — and both fields credited them for checking in. 
 		None of the three are visible to a present/null check. tone has come back negative, neutral, 
 		negative across three runs, so the assertion below is flaky by nature: negative's "did not do it" 
 		and neutral's "a bare status" both fit this note, and the model picks one at random.`
-				.replace(/\s+/g, " ")
-				.trim(),
+			.replace(/\s+/g, " ")
+			.trim(),
 		goal: WEIGHT,
 		why: WEIGHT_WHY,
 		note: "No I havn't start yet! So cold!",
@@ -148,6 +157,70 @@ export const CASES: Case[] = [
 		expect: {
 			tone: "positive",
 			ask_for_reason: "null",
+		},
+	},
+	{
+		id: "effect-factor",
+		because: `Real card. They answered the card's own question about the ideal job with three
+		concrete wants, and the reply was poetry — "a calm that has settled out of the tangle" — with
+		none of the three looked at. The model never saw the question it asked, so the answer read
+		as a bare status. Each want is a different kind of thing: friendly colleagues are out of their
+		hands, regular hours partly in them, a normal salary says what they are asking for.`
+			.replace(/\s+/g, " ")
+			.trim(),
+		goal: OFFER,
+		why: OFFER_WHY,
+		history: [{ day: "2026-09-17", note: "怕面上了也不是理想的岗位" }],
+		asked: "你说“理想的岗位”，能说说它对你来说是什么样子吗？",
+		note: "同事友好，按时上下班。有薪资，正常的范围就行",
+		stats: stats(),
+		expect: {
+			ask_for_reason: "null",
+			mentions: ["同事", "上下班", "薪资"],
+		},
+	},
+	{
+		id: "verdict-vs-record",
+		because: `The one day action is supposed to speak. They passed a verdict on themselves
+		("I haven't been studying at all") and the record disagrees — 9 check-ins in 14 days. The
+		count goes down beside what they said, without repeating the word they used.`
+			.replace(/\s+/g, " ")
+			.trim(),
+		goal: ENGLISH,
+		why: ENGLISH_WHY,
+		note: "我觉得我根本没在学，这段时间什么都没做。",
+		history: [
+			{ day: "2026-09-14", note: "背了二十分钟单词。" },
+			{ day: "2026-09-15", note: "看了一集美剧，没开字幕。" },
+			{ day: "2026-09-16", note: "今天太累了，没动。" },
+		],
+		stats: stats({ days: 9, dayNumber: 14, hardDays: 3, goodDays: 4 }),
+		expect: {
+			tone: "negative",
+			action: "present",
+		},
+	},
+	{
+		id: "stale-memory",
+		because: `Snowball guard. An earlier noticed line is now out of date, and today's note says
+		so outright. The card must follow today, not the memory — a reading that was true once must
+		not keep being repeated back at them.`
+			.replace(/\s+/g, " ")
+			.trim(),
+		goal: ENGLISH,
+		why: ENGLISH_WHY,
+		note: "跟同事开会说了十分钟英语，一点都不紧张了。",
+		history: [
+			{
+				day: "2026-09-15",
+				note: "又没敢开口。",
+				noticed: "他说开会时不敢说话，怕同事听出口音。害怕开口是目前最大的阻碍。",
+			},
+		],
+		stats: stats({ days: 8, dayNumber: 12, hardDays: 4, goodDays: 2 }),
+		expect: {
+			tone: "positive",
+			action: "null",
 		},
 	},
 ];

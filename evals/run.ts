@@ -14,6 +14,7 @@ async function main() {
 			goal: c.goal,
 			why: c.why,
 			note: c.note,
+			asked: c.asked,
 			history: c.history,
 			stats: c.stats,
 		});

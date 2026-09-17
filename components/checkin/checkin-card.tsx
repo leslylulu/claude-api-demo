@@ -41,12 +41,12 @@ export default function CheckinCard({
 				<div className="bg-purple-800/10 p-4 rounded-lg flex flex-col gap-4 ">
 					{c.emotion && <p className="text-gray-600 text-sm">{c.emotion}</p>}
 
-					{c.action && (
+					{c.encouragement && (
 						<blockquote className="border-l-2 border-(--accent) pl-4 text-lg text-foreground">
-							{c.action}
+							{c.encouragement}
 						</blockquote>
 					)}
-					{c.encouragement && <p className="text-sm text-(--muted)">{c.encouragement}</p>}
+					{c.action && <p className="text-sm text-(--muted)">{c.action}</p>}
 				</div>
 			)}
 			{c.ask_for_reason && onAnswer && (

@@ -2083,3 +2083,8 @@ a failed send, and cancellation of an in-flight tool round. See
       themselves, and the prompt already says never to argue against a verdict
       they did not pass. So the card answers a self-attack that was never made.
       Fixing the feeling without fixing this leaves the worse half in place.
+- [ ] Advice when they are lost. Surfaced 2026-09-17. Collides with "never
+      assign a task" — maybe only when they explicitly ask "what should I do?".
+- [ ] `action` echoes the note back ("They did their 20 minutes today" under
+      "Did my 20 minutes"). Only earns its place when it adds what the note
+      lacks — a pattern across notes, or a number that disagrees. Null otherwise?

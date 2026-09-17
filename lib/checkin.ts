@@ -15,6 +15,24 @@ export type Feeling = (typeof FEELINGS)[number];
 export const TONES = ["positive", "neutral", "negative"] as const;
 
 export const CheckinSchema = z.object({
+	// Never shown. Written first so the sorting below is done before any field
+	// the user reads, and kept so the next check-in can pick this thread back up.
+	noticed: z.string().describe(`
+		Notes to yourself, before you write anything they will read.
+
+		Sort what today's note gives you:
+		- their own words, quoted, for anything they said they want or fear
+		- what is theirs to decide, and what they can only move toward
+		- what changed since the earlier notes, if anything did
+
+		Facts and quotes only. No feelings, no labels, no conclusions about who
+		they are — "they said 'a normal range is fine'" belongs here, "they are
+		anxious" does not. This comes back to you on later days, and a guess
+		written here becomes a fact you will read as true next time.
+
+		Two or three lines. Nobody reads this but you.
+	`),
+
 	feeling: z
 		.enum(FEELINGS)
 		.describe("The emotional state behind what they wrote, not the state of their task."),
@@ -26,6 +44,8 @@ export const CheckinSchema = z.object({
 		positive: something moved. It went well, it felt easier, they got through it.
 		negative: it was hard, they are stuck, blaming themselves, or did not do it.
 		neutral: nothing in particular happened. A flat day, a bare status, no strong feeling either way. When you cannot tell, it is neutral.
+		Venting is neutral too: pushing back at the goal itself — loud, joking, defending the habit — with no verdict on themselves. Even when they did not do it.
+		Only the goal itself. A complaint about the weather, their day, or how hard it is to begin is a reason they have not started — that is negative.
 	`),
 
 	emotion: z.string().nullable().describe(`
@@ -43,6 +63,11 @@ export const CheckinSchema = z.object({
 		When the note does not give you enough to see the mechanism, say the feeling plainly and stop. 
 		A guess dressed as insight is worse than no insight.
 
+		When they list concrete things they want or fear, go through them — do not
+		summarise the list into a mood. Say which ones are theirs to decide and which
+		they can only move toward, and what the shape of the list says about what they
+		are asking for. This is sorting, not advice: no steps, no "you should".
+
 		POSITIVE — name the relief or the lift, and say where it came from. Today felt different, and that difference is theirs, not luck.
 
 		NEGATIVE — this is where subject and object must be separated. If they passed a verdict on WHO they are — "I'm a failure", "I'm so lazy", or the same thing
@@ -57,9 +82,17 @@ export const CheckinSchema = z.object({
 
 		NEUTRAL — a day with no feeling in it is a normal day, not a failure to feel.
 		Say that plainly. Do not manufacture an emotion they did not express, and do not treat flatness as a problem to be fixed.
+		If they are venting, the feeling is real — name it lightly. Their reasons are true for them: do not argue with them, and do not defend the goal.
 	`),
 
 	action: z.string().nullable().describe(`
+			Null on most days. This field exists for one job: when they passed a verdict
+			on themselves that the record does not support, the record goes here.
+
+			"I never stick to anything" — and they have checked in 9 of 14 days. "I haven't
+			been studying" — and the count says otherwise. Set the record down beside what
+			they said and stop. That is the whole field.
+
 			A record, not a comment. It works by being factual, and by staying cold.
 			Encouragement is where the warmth lives, and it has nothing left to do if this
 			field has already done the lifting.
@@ -67,7 +100,7 @@ export const CheckinSchema = z.object({
 			No adjectives, no praise, no feelings — naming what they feel is emotion's job,
 			and saying it twice makes both weaker.
 
-			NUMBERS — default to not using them.
+			NUMBERS — the whole reason this field speaks.
 			The context gives you a day count, a check-in count, and how many days were
 			hard or went well. A number recited every day is a turnstile, not a record.
 
@@ -89,12 +122,10 @@ export const CheckinSchema = z.object({
 			Never invent, round, or guess a number. If it is not in the context, it does
 			not exist.
 
-			Day 1 is the one exception: with nothing behind them, say plainly that this is
-			the start.
-
-			EVERY OTHER DAY — which is most days — write today's fact.
-			What they did, or what they said, handed back plainly. Their own words are fair
-			material. A day count is not the only true thing about a day.
+			EVERY OTHER DAY — which is most days — this field is null.
+			Handing today's note back to them ("you did your 20 minutes today") tells them
+			nothing they did not just write. Say nothing instead. A card of emotion and
+			encouragement is a complete card; on day 1 there is no record yet, so null.
 
 			Do not walk through the earlier notes one by one. A day-by-day chronicle
 			("Day 1: ... Day 2: ... Day 3: ...") is the same turnstile wearing a different
@@ -138,7 +169,7 @@ export const CheckinSchema = z.object({
 		.nullable().describe(`
 			Use this only when you cannot tell WHY this matters to them, and knowing
 			would change what the card should say. Null otherwise — do not ask just to
-			fill the field.
+			fill the field. If the note already gives its own reasons, you can tell: null.
 
 			question: one gentle question inviting them to say more. A question, not a
 			request that they justify themselves.

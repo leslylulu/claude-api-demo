@@ -34,7 +34,7 @@ export async function POST(req: Request) {
 		return new Response("Too many check-ins. Try again later.", { status: 429 });
 	}
 
-	const { note, goal_id } = await req.json();
+	const { note, goal_id, asked } = await req.json();
 
 	if (typeof note !== "string" || !note.trim()) {
 		return new Response("note is required", { status: 400 });
@@ -69,7 +69,7 @@ export async function POST(req: Request) {
 		// the count never drags 300 notes across the wire.
 		supabase
 			.from("checkins")
-			.select("day, note")
+			.select("day, note, noticed:result->>noticed")
 			.eq("goal_id", goal_id)
 			.order("at", { ascending: false })
 			.limit(5),
@@ -98,6 +98,7 @@ export async function POST(req: Request) {
 			goal: goal.text,
 			why: goal.why,
 			note,
+			asked: typeof asked === "string" ? asked : null,
 			history,
 			stats,
 		});

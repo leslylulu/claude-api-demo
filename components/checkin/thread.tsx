@@ -80,6 +80,7 @@ export default function Thread({ goal }: { goal: Goal }) {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({
 					note: text,
+					asked: entry.result.ask_for_reason?.question,
 					goal_id: goal.id,
 				}),
 			});
