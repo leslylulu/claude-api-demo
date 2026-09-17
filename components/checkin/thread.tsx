@@ -180,7 +180,7 @@ function DayMarker({ day, today }: { day: string; today: boolean }) {
 		<div className={`relative text-sm ${today ? "font-medium text-foreground" : "text-(--muted)"}`}>
 			<span
 				aria-hidden
-				className={`absolute -left-2 top-1.5 h-2 w-2 -translate-x-1/2 rounded-full ring-4 ring-(--background) ${
+				className={`absolute -left-2 top-1.5 h-2 w-2 -translate-x-1/2 rounded-full ring-4 ring-background ${
 					today ? "bg-(--accent)" : "bg-(--border)"
 				}`}
 			/>

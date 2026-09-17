@@ -46,7 +46,7 @@ export default function CheckinCard({
 							{c.action}
 						</blockquote>
 					)}
-					{c.encouragement && <p className="text-sm text-(--muted)">❤️{c.encouragement}</p>}
+					{c.encouragement && <p className="text-sm text-(--muted)">{c.encouragement}</p>}
 				</div>
 			)}
 			{c.ask_for_reason && onAnswer && (
